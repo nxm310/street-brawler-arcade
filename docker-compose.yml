@@ -1,0 +1,14 @@
+services:
+  street-brawler:
+    build: .
+    container_name: street-brawler
+    restart: unless-stopped
+    ports:
+      - "8089:80"
+    labels:
+      - "gethomepage.name=Street Brawler Arcade"
+      - "gethomepage.description=Jeu de combat 16-bit (6 combattants & 5 arènes, Solo / 2J)"
+      - "gethomepage.group=Outils & Loisirs"
+      - "gethomepage.icon=/icons/street-brawler.svg"
+      - "gethomepage.href=http://192.168.50.174:8089"
+      - "gethomepage.ping=http://192.168.50.174:8089/"

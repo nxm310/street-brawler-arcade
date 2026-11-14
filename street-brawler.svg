@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#141838"/>
+      <stop offset="100%" stop-color="#2c1248"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffe066"/>
+      <stop offset="55%" stop-color="#ffaa00"/>
+      <stop offset="100%" stop-color="#e65c00"/>
+    </linearGradient>
+    <linearGradient id="neon" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#00f0ff"/>
+      <stop offset="100%" stop-color="#ff2e93"/>
+    </linearGradient>
+    <linearGradient id="flame" x1="0" y1="1" x2="0" y2="0">
+      <stop offset="0%" stop-color="#ff2e63"/>
+      <stop offset="60%" stop-color="#ff8c00"/>
+      <stop offset="100%" stop-color="#ffe600"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Neo-Arcade badge frame -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="url(#bg)" stroke="url(#neon)" stroke-width="2.5"/>
+
+  <!-- Subtle arcade grid glow -->
+  <path d="M10 48 H54 M14 53 H50" stroke="#00f0ff" stroke-opacity="0.25" stroke-width="1.5" stroke-linecap="round"/>
+
+  <!-- Golden crescent horns / VS crown -->
+  <path d="M13 18 C11 11 17 7 23 11 C19 13 19 19 22 23 L17 26 C14 23 13 21 13 18 Z" fill="url(#gold)"/>
+  <path d="M51 18 C53 11 47 7 41 11 C45 13 45 19 42 23 L47 26 C50 23 51 21 51 18 Z" fill="url(#gold)"/>
+
+  <!-- Fiery impact aura behind fist & joystick -->
+  <path d="M32 10 L36 19 L44 16 L40 26 L48 31 L38 35 L32 45 L26 35 L16 31 L24 26 L20 16 L28 19 Z" fill="url(#flame)" opacity="0.92"/>
+
+  <!-- Power fist / Arcade stick core -->
+  <rect x="22" y="21" width="20" height="14" rx="4" fill="#ffffff" stroke="#141838" stroke-width="2"/>
+  <path d="M27 21 V28 M32 21 V28 M37 21 V28" stroke="#141838" stroke-width="1.8" stroke-linecap="round"/>
+  <rect x="25" y="34" width="14" height="6" rx="2" fill="#00f0ff" stroke="#141838" stroke-width="1.8"/>
+
+  <!-- Lightning bolts -->
+  <path d="M15 36 L11 43 L16 43 L13 50 L21 41 L16 41 Z" fill="#00f0ff"/>
+  <path d="M49 36 L53 43 L48 43 L51 50 L43 41 L48 41 Z" fill="#ffe066"/>
+
+  <!-- Arcade action buttons -->
+  <circle cx="24" cy="51" r="3" fill="#ff2e93"/>
+  <circle cx="32" cy="51" r="3" fill="#ffe066"/>
+  <circle cx="40" cy="51" r="3" fill="#00f0ff"/>
+</svg>
