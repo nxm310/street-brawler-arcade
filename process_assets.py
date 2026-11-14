@@ -991,9 +991,9 @@ def build_france_map():
 
     draw = ImageDraw.Draw(img)
 
-    # Grands fleuves stylisés en pixel-art (Seine, Loire, Garonne, Rhône)
+    # Grands fleuves stylisés en pixel-art (Seine/Marne par Paris & Château-Thierry, Loire, Garonne, Rhône)
     rivers = [
-        [geo(0.10, 49.48), geo(1.1, 49.4), geo(2.35, 48.86), geo(3.4, 48.4), geo(4.2, 47.9)],
+        [geo(0.10, 49.48), geo(1.1, 49.4), geo(2.35, 48.86), geo(3.40, 49.05), geo(4.03, 49.05)],
         [geo(-2.15, 47.20), geo(-0.5, 47.45), geo(1.4, 47.9), geo(2.9, 47.2), geo(4.1, 45.6)],
         [geo(-1.15, 45.55), geo(-0.4, 44.8), geo(1.44, 43.60), geo(1.1, 42.9)],
         [geo(4.75, 43.35), geo(4.8, 44.5), geo(4.85, 45.75), geo(5.9, 46.1)],
@@ -1001,48 +1001,46 @@ def build_france_map():
     for rv in rivers:
         draw.line(rv, fill=(44, 156, 232), width=2)
 
-    # --- 6 DÉCORS RÉGIONAUX EN RAPPORT AVEC LE JEU (sur la carte de France) ---
-    # 1) PARIS (DarkMada & Sushi) : Petite Tour Eiffel + Arche Néon Route 66 + Niche dorée
-    pe_x, pe_y = 180, 62  # près de Paris élargi
-    draw.polygon([(pe_x, pe_y - 16), (pe_x - 5, pe_y), (pe_x + 5, pe_y)], fill=(250, 204, 21), outline=(24, 24, 27))
-    draw.line([(pe_x - 3, pe_y - 6), (pe_x + 3, pe_y - 6)], fill=(244, 63, 94), width=1)
-    # Symbole route 66 à gauche de la Tour Eiffel
-    draw.rectangle((pe_x - 14, pe_y - 8, pe_x - 7, pe_y - 2), fill=(24, 24, 27), outline=(244, 63, 94))
-    draw.point((pe_x - 11, pe_y - 5), fill=(250, 204, 21))
+    # --- 6 DÉCORS RÉGIONAUX AUX VRAIES COORDONNÉES GPS SUR LA CARTE DE FRANCE ---
+    # 1) PARIS (DarkMada & Sushi) : 48.8566° N, 2.3522° E -> Tour Eiffel à gauche du point
+    pe_x, pe_y = geo(2.3522, 48.8566)
+    draw.polygon([(pe_x - 6, pe_y - 16), (pe_x - 10, pe_y), (pe_x - 2, pe_y)], fill=(250, 204, 21), outline=(24, 24, 27))
+    draw.line([(pe_x - 9, pe_y - 6), (pe_x - 3, pe_y - 6)], fill=(244, 63, 94), width=1)
+    draw.rectangle((pe_x - 16, pe_y - 8, pe_x - 11, pe_y - 3), fill=(24, 24, 27), outline=(244, 63, 94))
 
-    # 2) CHÂTEAU-THIERRY (GOLDOHRACK) : Château fort + Tours nucléaires vertes bien détachées
-    ct_x, ct_y = 207, 73
-    draw.polygon([(ct_x + 7, ct_y), (ct_x + 9, ct_y - 11), (ct_x + 14, ct_y - 11), (ct_x + 16, ct_y)], fill=(71, 85, 105), outline=(24, 24, 27))
-    draw.rectangle((ct_x + 10, ct_y - 15, ct_x + 13, ct_y - 12), fill=(74, 222, 128))  # panache vert nucléaire
-    draw.rectangle((ct_x - 3, ct_y - 8, ct_x + 4, ct_y), fill=(220, 38, 38), outline=(250, 204, 21))  # donjon rouge Goldohrack
+    # 2) CHÂTEAU-THIERRY (GOLDOHRACK) : 49.0464° N, 3.4030° E -> Donjon + centrale décalés légèrement SE
+    ct_x, ct_y = geo(3.4030, 49.0464)
+    draw.polygon([(ct_x + 7, ct_y + 7), (ct_x + 9, ct_y - 2), (ct_x + 13, ct_y - 2), (ct_x + 15, ct_y + 7)], fill=(71, 85, 105), outline=(24, 24, 27))
+    draw.rectangle((ct_x + 10, ct_y - 5, ct_x + 12, ct_y - 3), fill=(74, 222, 128))
+    draw.rectangle((ct_x, ct_y + 2, ct_x + 5, ct_y + 8), fill=(220, 38, 38), outline=(250, 204, 21))
 
     # Petits bosquets forestiers (Landes & Vosges) pour enrichir le décor naturel
     for fx, fy in [(142, 134), (138, 144), (242, 74), (250, 82), (168, 92)]:
         draw.ellipse((fx - 4, fy - 4, fx + 4, fy + 4), fill=(34, 84, 34))
         draw.point((fx - 1, fy - 1), fill=(74, 154, 62))
 
-    # 3) LAON (M3G4TRONCH3) : Dôme radar Star Citizen cyan sur sa butte
-    ln_x, ln_y = 212, 46
-    draw.rectangle((ln_x - 4, ln_y - 9, ln_x + 4, ln_y), fill=(100, 116, 139), outline=(15, 23, 42))
-    draw.arc((ln_x - 5, ln_y - 14, ln_x + 5, ln_y - 4), 180, 360, fill=(56, 189, 248))
-    draw.point((ln_x, ln_y - 14), fill=(224, 242, 254))
+    # 3) LAON (M3G4TRONCH3) : 49.5641° N, 3.6240° E -> Dôme radar Star Citizen cyan juste au-dessus
+    ln_x, ln_y = geo(3.6240, 49.5641)
+    draw.rectangle((ln_x - 3, ln_y - 9, ln_x + 3, ln_y - 3), fill=(100, 116, 139), outline=(15, 23, 42))
+    draw.arc((ln_x - 4, ln_y - 13, ln_x + 4, ln_y - 5), 180, 360, fill=(56, 189, 248))
+    draw.point((ln_x, ln_y - 13), fill=(224, 242, 254))
 
-    # 4) REIMS (MADCHAT) : Épée de feu géante plantée dans les vignes de Champagne
-    rm_x, rm_y = 236, 61
-    for vx in range(rm_x - 8, rm_x + 8, 4):
+    # 4) REIMS (MADCHAT) : 49.2583° N, 4.0317° E -> Vignes de Champagne & épée de feu à l'est du point
+    rm_x, rm_y = geo(4.0317, 49.2583)
+    for vx in range(rm_x + 3, rm_x + 15, 4):
         draw.rectangle((vx, rm_y - 2, vx + 2, rm_y), fill=(163, 230, 53))
-    draw.line([(rm_x, rm_y - 14), (rm_x, rm_y)], fill=(226, 232, 240), width=2)
-    draw.line([(rm_x - 4, rm_y - 10), (rm_x + 4, rm_y - 10)], fill=(249, 115, 22), width=2)
-    draw.point((rm_x, rm_y - 15), fill=(253, 224, 71))
+    draw.line([(rm_x + 8, rm_y - 13), (rm_x + 8, rm_y)], fill=(226, 232, 240), width=2)
+    draw.line([(rm_x + 4, rm_y - 9), (rm_x + 12, rm_y - 9)], fill=(249, 115, 22), width=2)
+    draw.point((rm_x + 8, rm_y - 14), fill=(253, 224, 71))
 
-    # 5) CHARTRES (LURCK) : Flèches gothiques & lune dorée du hibou
-    ch_x, ch_y = 148, 76
-    draw.polygon([(ch_x - 3, ch_y), (ch_x - 1, ch_y - 12), (ch_x + 1, ch_y)], fill=(109, 40, 217), outline=(24, 24, 27))
-    draw.polygon([(ch_x + 2, ch_y), (ch_x + 4, ch_y - 14), (ch_x + 6, ch_y)], fill=(126, 34, 206), outline=(24, 24, 27))
-    draw.ellipse((ch_x - 9, ch_y - 15, ch_x - 3, ch_y - 9), fill=(250, 204, 21))
+    # 5) CHARTRES (LURCK) : 48.4439° N, 1.4890° E -> Flèches gothiques & lune dorée à gauche du point
+    ch_x, ch_y = geo(1.4890, 48.4439)
+    draw.polygon([(ch_x - 9, ch_y + 2), (ch_x - 7, ch_y - 9), (ch_x - 5, ch_y + 2)], fill=(109, 40, 217), outline=(24, 24, 27))
+    draw.polygon([(ch_x - 5, ch_y + 2), (ch_x - 3, ch_y - 11), (ch_x - 1, ch_y + 2)], fill=(126, 34, 206), outline=(24, 24, 27))
+    draw.ellipse((ch_x - 14, ch_y - 12, ch_x - 9, ch_y - 7), fill=(250, 204, 21))
 
-    # 6) TOULOUSE (KOLL) : Capitole rose & bobine Tesla cyan/lapin
-    tl_x, tl_y = 176, 152
+    # 6) TOULOUSE (KOLL) : 43.6047° N, 1.4442° E -> Capitole rose & bobine Tesla cyan
+    tl_x, tl_y = geo(1.4442, 43.6047)
     draw.rectangle((tl_x - 6, tl_y - 8, tl_x + 6, tl_y), fill=(225, 29, 72), outline=(24, 24, 27))
     draw.polygon([(tl_x - 4, tl_y - 8), (tl_x, tl_y - 13), (tl_x + 4, tl_y - 8)], fill=(251, 146, 60))
     draw.line([(tl_x + 8, tl_y), (tl_x + 8, tl_y - 11)], fill=(56, 189, 248), width=1)

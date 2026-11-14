@@ -1266,7 +1266,7 @@ export function drawFranceMapScreen(ctx, state) {
     const isDest = id === f2.id;
     const { x, y } = f.mapPos;
 
-    const r = isStart || isDest ? 9 : 6;
+    const r = isStart || isDest ? 7 : 5;
     ctx.fillStyle = '#09090b';
     ctx.fillRect(x - r - 2, y - r - 2, (r + 2) * 2, (r + 2) * 2);
 
