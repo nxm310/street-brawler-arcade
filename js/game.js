@@ -1,6 +1,20 @@
 import { FIGHTER_ORDER, FIGHTERS, ARENA_ORDER, ARENAS } from './data.js';
 import { SoundEngine } from './audio.js';
-import { STAGE_W, FLOOR_Y, drawArena, drawFighter, drawSpecialFX, drawEffects, drawHUD } from './renderer.js';
+import {
+  STAGE_W,
+  STAGE_H,
+  FLOOR_Y,
+  getSelectLayout,
+  drawArena,
+  drawFighter,
+  drawSpecialFX,
+  drawEffects,
+  drawHUD,
+  drawTitleScreen,
+  drawSelectScreen,
+  drawFranceMapScreen,
+  drawVsScreen
+} from './renderer.js';
 
 const canvas = document.getElementById('gameCanvas');
 const ctx = canvas.getContext('2d');
@@ -8,8 +22,6 @@ const sound = new SoundEngine();
 
 // Éléments DOM
 const stageContainer = document.getElementById('stageContainer');
-const menuOverlay = document.getElementById('menuOverlay');
-const selectOverlay = document.getElementById('selectOverlay');
 const matchOverOverlay = document.getElementById('matchOverOverlay');
 
 const modeBotHeaderBtn = document.getElementById('modeBotHeaderBtn');
@@ -18,19 +30,6 @@ const botDiffSelect = document.getElementById('botDiffSelect');
 const openSelectHeaderBtn = document.getElementById('openSelectHeaderBtn');
 const audioToggleBtn = document.getElementById('audioToggleBtn');
 const fullscreenBtn = document.getElementById('fullscreenBtn');
-
-const startSoloBtn = document.getElementById('startSoloBtn');
-const startLocalBtn = document.getElementById('startLocalBtn');
-const menuToSelectBtn = document.getElementById('menuToSelectBtn');
-
-const selectTargetP1Btn = document.getElementById('selectTargetP1Btn');
-const selectTargetP2Btn = document.getElementById('selectTargetP2Btn');
-const p1SelectedSummary = document.getElementById('p1SelectedSummary');
-const p2SelectedSummary = document.getElementById('p2SelectedSummary');
-const fighterGrid = document.getElementById('fighterGrid');
-const arenaGrid = document.getElementById('arenaGrid');
-const launchFightBtn = document.getElementById('launchFightBtn');
-const backToMenuBtn = document.getElementById('backToMenuBtn');
 
 const matchWinnerTitle = document.getElementById('matchWinnerTitle');
 const matchWinnerSubtitle = document.getElementById('matchWinnerSubtitle');
@@ -46,18 +45,19 @@ const controlsP2Text = document.getElementById('controlsP2Text');
 
 // État global du jeu
 const game = {
-  screen: 'menu', // 'menu' | 'select' | 'intro' | 'fight' | 'roundOver' | 'matchOver'
+  screen: 'menu', // 'menu' | 'select' | 'map' | 'vs' | 'intro' | 'fight' | 'roundOver' | 'matchOver'
   mode: 'bot', // 'bot' | 'local'
   botDiff: 'normal', // 'easy' | 'normal' | 'hard'
   arena: 'cod',
-  p1Choice: 'darkmada',
-  p2Choice: 'goldohrack',
-  selectTarget: 1, // 1 ou 2 dans l'écran de sélection
+  p1Choice: 'goldohrack',
+  p2Choice: 'darkmada',
+  selectTarget: 1,
   roundNumber: 1,
   timer: 99,
   announcement: '',
   announcementTimer: 0,
   phaseTimer: 0,
+  phaseDuration: 0,
   tick: 0,
   shake: 0,
   specialFx: null,
@@ -79,7 +79,7 @@ function createFighter(id, x, facing) {
     facing,
     hp: 100,
     trailHp: 100,
-    superMeter: 100,
+    superMeter: 0, // Démarre à 0% et se recharge avec les coups portés !
     rounds: 0,
     state: 'idle', // 'idle' | 'walk' | 'jump' | 'crouch' | 'block' | 'light' | 'heavy' | 'special' | 'hit' | 'ko'
     stateTimer: 0,
@@ -98,12 +98,12 @@ function createFighter(id, x, facing) {
 function resetRoundFighters(keepRounds) {
   const r1 = keepRounds && game.fighters[0] ? game.fighters[0].rounds : 0;
   const r2 = keepRounds && game.fighters[1] ? game.fighters[1].rounds : 0;
-  const s1 = keepRounds && game.fighters[0] ? Math.max(60, game.fighters[0].superMeter) : 100;
-  const s2 = keepRounds && game.fighters[1] ? Math.max(60, game.fighters[1].superMeter) : 100;
+  const s1 = keepRounds && game.fighters[0] ? game.fighters[0].superMeter : 0;
+  const s2 = keepRounds && game.fighters[1] ? game.fighters[1].superMeter : 0;
 
   game.fighters = [
-    createFighter(game.p1Choice, 290, 1),
-    createFighter(game.p2Choice, STAGE_W - 290, -1)
+    createFighter(game.p1Choice, 310, 1),
+    createFighter(game.p2Choice, STAGE_W - 310, -1)
   ];
   game.fighters[0].rounds = r1;
   game.fighters[1].rounds = r2;
@@ -115,43 +115,62 @@ function resetRoundFighters(keepRounds) {
   game.timer = 99;
 }
 
-// Initialisation initiale des combattants d'arrière-plan pour le menu
 resetRoundFighters(false);
 
 function setScreen(nextScreen) {
   game.screen = nextScreen;
-  menuOverlay.hidden = nextScreen !== 'menu';
-  selectOverlay.hidden = nextScreen !== 'select';
   matchOverOverlay.hidden = nextScreen !== 'matchOver';
 
-  if (nextScreen === 'select') {
-    renderSelectionUI();
+  if (nextScreen === 'menu') {
+    sound.setMusicMode('title');
+  } else if (nextScreen === 'select') {
+    sound.setMusicMode('select');
+  } else if (nextScreen === 'map' || nextScreen === 'vs') {
+    sound.setMusicMode('none');
+  } else if (nextScreen === 'intro' || nextScreen === 'fight') {
+    sound.setMusicMode('fight');
+  } else if (nextScreen === 'matchOver') {
+    sound.setMusicMode('victory');
   }
+
   updateHeaderAndBars();
 }
 
-function startMatch() {
-  if (document.activeElement instanceof HTMLElement) {
+function startTourAndFight() {
+  if (document.activeElement instanceof HTMLElement && document.activeElement !== canvas) {
     document.activeElement.blur();
   }
   sound.unlock();
-  sound.playRoundStart();
+  sound.playConfirm();
   game.roundNumber = 1;
   resetRoundFighters(false);
+
+  // Lance d'abord la Carte de France animée (pointillés d'une ville à l'autre)
+  game.phaseDuration = 155;
+  game.phaseTimer = 155;
+  setScreen('map');
+}
+
+function enterVsScreen() {
+  game.phaseDuration = 110;
+  game.phaseTimer = 110;
+  setScreen('vs');
+  sound.playVsFanfare();
+}
+
+function enterIntroRound() {
+  sound.playRoundStart();
   setScreen('intro');
-  game.announcement = 'ROUND 1';
+  game.announcement = `ROUND ${game.roundNumber}`;
   game.announcementTimer = 75;
+  game.phaseDuration = 90;
   game.phaseTimer = 90;
 }
 
 function startNextRound() {
   game.roundNumber++;
   resetRoundFighters(true);
-  setScreen('intro');
-  game.announcement = `ROUND ${game.roundNumber}`;
-  game.announcementTimer = 75;
-  game.phaseTimer = 90;
-  sound.playRoundStart();
+  enterIntroRound();
 }
 
 function spawnParticles(x, y, color, count, speed = 7) {
@@ -191,14 +210,13 @@ function updateHeaderAndBars() {
   controlsP2Text.textContent =
     game.mode === 'bot'
       ? 'BOT IA : contrôle automatique (difficulté réglable en haut)'
-      : 'J2 Local : ←/→ déplacer · ↑ sauter · ↓ garde · K léger · L lourd · O ou Entrée Spécial';
+      : 'J2 Local : ←/→ bouger · ↑ sauter · ↓ garde · K/L frapper · Maj Droite ou O Spécial';
 
   const inFight = game.screen === 'fight';
   triggerSpecialP1Btn.disabled = !inFight;
   triggerSpecialP2Btn.disabled = !inFight || game.mode === 'bot';
   refillSuperBtn.disabled = !(game.screen === 'fight' || game.screen === 'intro');
 
-  // Met à jour la barre rapide des arènes
   const arenaButtons = quickArenaBar.querySelectorAll('button[data-arena]');
   arenaButtons.forEach(btn => {
     btn.classList.toggle('is-active', btn.dataset.arena === game.arena);
@@ -215,89 +233,13 @@ function buildQuickArenaBar() {
     btn.className = 'arena-pill';
     btn.textContent = a.name;
     btn.addEventListener('click', () => {
+      sound.unlock();
       game.arena = id;
       sound.playMenu();
       updateHeaderAndBars();
-      renderSelectionUI();
       btn.blur();
     });
     quickArenaBar.appendChild(btn);
-  });
-}
-
-function renderSelectionUI() {
-  const f1 = FIGHTERS[game.p1Choice];
-  const f2 = FIGHTERS[game.p2Choice];
-  selectTargetP1Btn.classList.toggle('is-active', game.selectTarget === 1);
-  selectTargetP2Btn.classList.toggle('is-active', game.selectTarget === 2);
-  selectTargetP2Btn.textContent = game.mode === 'bot' ? 'Choisir BOT' : 'Choisir J2';
-
-  p1SelectedSummary.innerHTML = `<strong>J1 : ${f1.name}</strong> — ⚡ ${f1.specialName}`;
-  p2SelectedSummary.innerHTML = `<strong>${game.mode === 'bot' ? 'BOT' : 'J2'} : ${f2.name}</strong> — ⚡ ${f2.specialName}`;
-
-  fighterGrid.innerHTML = '';
-  FIGHTER_ORDER.forEach(id => {
-    const f = FIGHTERS[id];
-    const isP1 = game.p1Choice === id;
-    const isP2 = game.p2Choice === id;
-    const card = document.createElement('button');
-    card.type = 'button';
-    card.className = 'select-card';
-    if (isP1) card.classList.add('is-p1');
-    if (isP2) card.classList.add('is-p2');
-
-    const badges = [
-      isP1 ? '<span class="tag tag-p1">J1</span>' : '',
-      isP2 ? `<span class="tag tag-p2">${game.mode === 'bot' ? 'BOT' : 'J2'}</span>` : ''
-    ].join('');
-
-    card.innerHTML = `
-      <div class="select-card-row">
-        <img src="assets/fighters/${id}_portrait.png" alt="${f.name}" class="select-portrait" width="46" height="46" />
-        <div class="select-card-body">
-          <div class="select-card-head">
-            <span class="select-card-title">${f.name}</span>
-            <span class="select-card-tags">${badges}</span>
-          </div>
-          <div class="select-card-sub">${f.subtitle}</div>
-          <div class="select-card-special">⚡ ${f.specialName}</div>
-        </div>
-      </div>
-    `;
-    card.addEventListener('click', () => {
-      sound.playMenu();
-      if (game.selectTarget === 1) {
-        game.p1Choice = id;
-        game.selectTarget = 2;
-      } else {
-        game.p2Choice = id;
-        game.selectTarget = 1;
-      }
-      resetRoundFighters(false);
-      renderSelectionUI();
-    });
-    fighterGrid.appendChild(card);
-  });
-
-  arenaGrid.innerHTML = '';
-  ARENA_ORDER.forEach(id => {
-    const a = ARENAS[id];
-    const card = document.createElement('button');
-    card.type = 'button';
-    card.className = 'arena-card';
-    if (game.arena === id) card.classList.add('is-selected');
-    card.innerHTML = `
-      <img src="assets/arenas/${id}.png" alt="${a.name}" class="arena-thumb" width="160" height="90" />
-      <div class="arena-card-title">${a.name}</div>
-      <div class="arena-card-sub">${a.subtitle}</div>
-    `;
-    card.addEventListener('click', () => {
-      sound.playMenu();
-      game.arena = id;
-      renderSelectionUI();
-      updateHeaderAndBars();
-    });
-    arenaGrid.appendChild(card);
   });
 }
 
@@ -310,7 +252,12 @@ function triggerAttack(attackerIdx, type) {
   }
 
   if (type === 'special') {
-    if (f.superMeter < 100 || game.specialFx) return;
+    if (f.superMeter < 100 || game.specialFx) {
+      if (f.superMeter < 100) {
+        addFloatingText(f.x, f.y - 230, `SPÉCIAL ${Math.round(f.superMeter)}%`, '#38bdf8', 18);
+      }
+      return;
+    }
     f.superMeter = 0;
     f.state = 'special';
     f.stateTimer = 55;
@@ -319,11 +266,11 @@ function triggerAttack(attackerIdx, type) {
     game.specialFx = {
       attackerIdx,
       timer: 0,
-      duration: 75,
+      duration: 78,
       hitApplied: false
     };
     game.shake = 10;
-    spawnParticles(f.x, f.y - 100, f.def.color, 26, 8);
+    spawnParticles(f.x, f.y - 120, f.def.color, 26, 8);
     sound.playSpecial(f.id);
     return;
   }
@@ -332,43 +279,56 @@ function triggerAttack(attackerIdx, type) {
   f.stateTimer = type === 'light' ? 18 : 28;
   f.attackDidHit = false;
   if (f.y >= FLOOR_Y) {
-    f.vx = f.facing * (type === 'light' ? 2.5 : 4.2);
+    f.vx = f.facing * (type === 'light' ? 3.2 : 4.8);
   }
   if (type === 'light') sound.playLight();
   else sound.playHeavy();
 }
 
-function applyHit(attackerIdx, dmg, knockback, isSpecial = false) {
+function applyHit(attackerIdx, dmg, knockback, isSpecial = false, attackKind = 'light') {
   const attacker = game.fighters[attackerIdx];
   const defender = game.fighters[1 - attackerIdx];
   if (defender.state === 'ko') return;
 
   const isBlocking = defender.state === 'block';
-  const finalDmg = isBlocking ? Math.max(2, Math.round(dmg * 0.22)) : dmg;
+  const finalDmg = isBlocking ? Math.max(2, Math.round(dmg * 0.25)) : dmg;
 
   defender.hp = Math.max(0, defender.hp - finalDmg);
   defender.vx = (attacker.x < defender.x ? 1 : -1) * (isBlocking ? knockback * 0.45 : knockback);
 
+  // Recharge progressive du Coup Spécial en fonction des coups donnés
+  const meterGain = isSpecial
+    ? 0
+    : isBlocking
+      ? 8
+      : attackKind === 'heavy'
+        ? 26
+        : 18;
+  attacker.superMeter = Math.min(100, attacker.superMeter + meterGain);
+  defender.superMeter = Math.min(100, defender.superMeter + 6);
+
   if (isBlocking) {
     sound.playBlock();
-    defender.superMeter = Math.min(100, defender.superMeter + 10);
     spawnParticles(defender.x, defender.y - 95, '#38bdf8', 14, 5);
-    addFloatingText(defender.x, defender.y - 170, `GARDE -${finalDmg}`, '#38bdf8', 22);
+    addFloatingText(defender.x, defender.y - 175, `GARDE -${finalDmg}%`, '#38bdf8', 22);
   } else {
     defender.state = 'hit';
-    defender.stateTimer = isSpecial ? 28 : 16;
+    defender.stateTimer = isSpecial ? 26 : 14;
     defender.comboCount++;
     defender.comboTimer = 85;
-    attacker.superMeter = Math.min(100, attacker.superMeter + (isSpecial ? 0 : 18));
-    defender.superMeter = Math.min(100, defender.superMeter + 12);
-    game.shake = isSpecial ? 18 : 8;
-    spawnParticles(defender.x, defender.y - 100, attacker.def.color, isSpecial ? 36 : 16, isSpecial ? 10 : 6);
+    game.shake = isSpecial ? 16 : 8;
+    const hitCol = attacker.id === 'darkmada' && isSpecial ? '#f472b6' : attacker.def.color;
+    spawnParticles(defender.x, defender.y - 110, hitCol, isSpecial ? 36 : 16, isSpecial ? 10 : 6);
     addFloatingText(
       defender.x,
-      defender.y - 175,
-      isSpecial ? `SUPER HIT -${finalDmg}!` : `-${finalDmg}`,
+      defender.y - 185,
+      isSpecial
+        ? attacker.id === 'darkmada'
+          ? `BISOUS ♥ -${finalDmg}%`
+          : `SUPER -${finalDmg}%!`
+        : `-${finalDmg}%`,
       isSpecial ? '#fde047' : '#ffffff',
-      isSpecial ? 30 : 22
+      isSpecial ? 30 : 24
     );
   }
 
@@ -401,16 +361,16 @@ function showMatchOver() {
     title = `${game.mode === 'bot' ? 'VICTOIRE BOT IA' : 'VICTOIRE J2'} · ${p2.def.name} !`;
   }
   matchWinnerTitle.textContent = title;
-  matchWinnerSubtitle.textContent = `Score final : ${p1.rounds} - ${p2.rounds} · Arène : ${ARENAS[game.arena].name}`;
+  matchWinnerSubtitle.textContent = `Score final : ${p1.rounds} - ${p2.rounds} · Arène : ${ARENAS[game.arena].name} (${p2.def.city})`;
   setScreen('matchOver');
 }
 
-// --- CONTRÔLES CLAVIER (AZERTY + QWERTY) ---
+// --- CONTRÔLES CLAVIER (SAUTER = ESPACE, FRAPPER = F, SPÉCIAL = ENTRÉE) ---
 function readPlayerInput(idx) {
   if (idx === 0) {
-    const left = keys.has('KeyA') || keys.has('KeyQ');
-    const right = keys.has('KeyD');
-    const up = keys.has('KeyW') || keys.has('KeyZ');
+    const left = keys.has('KeyA') || keys.has('KeyQ') || (game.mode === 'bot' && keys.has('ArrowLeft'));
+    const right = keys.has('KeyD') || (game.mode === 'bot' && keys.has('ArrowRight'));
+    const up = keys.has('Space') || keys.has('KeyW') || keys.has('KeyZ');
     const down = keys.has('KeyS');
     return { left, right, up, down };
   }
@@ -440,7 +400,7 @@ function updateHumanFighter(idx) {
 
   if (onGround && (input.down || (holdingBack && oppAttacking))) {
     f.vx = 0;
-    f.state = holdingBack && oppAttacking ? 'block' : input.down && oppAttacking ? 'block' : 'crouch';
+    f.state = oppAttacking ? 'block' : 'crouch';
     return;
   }
 
@@ -472,13 +432,12 @@ function pickBotTactic(bot, dist) {
     if (r < 0.80) return { tactic: 'footsies', dur: 32 + Math.floor(Math.random() * 24) };
     return { tactic: 'observe', dur: 30 + Math.floor(Math.random() * 22) };
   }
-  if (dist >= 175) {
+  if (dist >= 195) {
     if (r < 0.32) return { tactic: 'observe', dur: 28 + Math.floor(Math.random() * 24) };
     if (r < 0.65) return { tactic: 'footsies', dur: 34 + Math.floor(Math.random() * 26) };
     if (r < 0.85) return { tactic: 'approach', dur: 24 + Math.floor(Math.random() * 18) };
     return { tactic: 'retreat', dur: 22 + Math.floor(Math.random() * 18) };
   }
-  // Courte portée : laisse respirer l'échange après un coup
   if (r < 0.35) return { tactic: 'retreat', dur: 26 + Math.floor(Math.random() * 18) };
   if (r < 0.60) return { tactic: 'observe', dur: 24 + Math.floor(Math.random() * 20) };
   if (r < 0.85) return { tactic: 'approach', dur: 20 + Math.floor(Math.random() * 14) };
@@ -504,12 +463,11 @@ function updateBotFighter() {
   const playerAttacking = player.state === 'light' || player.state === 'heavy' || player.state === 'special';
 
   const diff = game.botDiff;
-  const blockChance = diff === 'easy' ? 0.22 : diff === 'normal' ? 0.45 : 0.65;
-  const atkRecovery = diff === 'easy' ? 80 : diff === 'normal' ? 55 : 38;
+  const blockChance = diff === 'easy' ? 0.22 : diff === 'normal' ? 0.42 : 0.62;
+  const atkRecovery = diff === 'easy' ? 82 : diff === 'normal' ? 56 : 38;
   const specialRate = diff === 'easy' ? 0.008 : diff === 'normal' ? 0.022 : 0.04;
 
-  // Réaction défensive réaliste quand le joueur attaque tout près
-  if (onGround && playerAttacking && dist < 220 && bot.botTactic !== 'defend') {
+  if (onGround && playerAttacking && dist < 245 && bot.botTactic !== 'defend') {
     if (Math.random() < blockChance) {
       bot.botTactic = 'defend';
       bot.botTacticTimer = 18;
@@ -526,9 +484,8 @@ function updateBotFighter() {
     return;
   }
 
-  // Coup spécial modéré avec délai de récupération (jamais dès la 1ère seconde)
-  if (bot.superMeter >= 100 && !game.specialFx && bot.botSpecialCooldown <= 0 && dist < 760 && Math.random() < specialRate) {
-    bot.botSpecialCooldown = 260;
+  if (bot.superMeter >= 100 && !game.specialFx && bot.botSpecialCooldown <= 0 && dist < 780 && Math.random() < specialRate) {
+    bot.botSpecialCooldown = 240;
     bot.botAttackCooldown = atkRecovery + 20;
     triggerAttack(1, 'special');
     return;
@@ -539,13 +496,12 @@ function updateBotFighter() {
     bot.botTactic = picked.tactic;
     bot.botTacticTimer = picked.dur;
     if (bot.botTactic === 'footsies') {
-      if (dist > 310) bot.botMoveDir = dirToPlayer;
-      else if (dist < 210) bot.botMoveDir = -dirToPlayer;
+      if (dist > 320) bot.botMoveDir = dirToPlayer;
+      else if (dist < 220) bot.botMoveDir = -dirToPlayer;
       else bot.botMoveDir = Math.random() < 0.5 ? dirToPlayer : -dirToPlayer;
     }
   }
 
-  // Déplacement tactique selon la phase actuelle
   const speedScale = diff === 'easy' ? 0.72 : diff === 'normal' ? 0.85 : 0.95;
   if (bot.botTactic === 'observe') {
     bot.vx = 0;
@@ -554,17 +510,15 @@ function updateBotFighter() {
   } else if (bot.botTactic === 'footsies') {
     bot.vx = bot.botMoveDir * bot.def.speed * 0.58 * speedScale;
   } else if (bot.botTactic === 'approach') {
-    bot.vx = dist > 155 ? dirToPlayer * bot.def.speed * 0.85 * speedScale : 0;
-    // Petit saut d'approche occasionnel
-    if (onGround && dist > 230 && dist < 380 && Math.random() < 0.015) {
+    bot.vx = dist > 180 ? dirToPlayer * bot.def.speed * 0.85 * speedScale : 0;
+    if (onGround && dist > 250 && dist < 400 && Math.random() < 0.015) {
       bot.vy = bot.def.jumpForce;
       bot.y -= 2;
       bot.state = 'jump';
     }
   }
 
-  // Attaque uniquement si à portée et cooldown terminé, puis reprise de distance
-  if (dist < 180 && bot.botAttackCooldown <= 0 && (bot.botTactic === 'approach' || (bot.botTactic === 'footsies' && Math.random() < 0.06))) {
+  if (dist < 225 && bot.botAttackCooldown <= 0 && (bot.botTactic === 'approach' || (bot.botTactic === 'footsies' && Math.random() < 0.06))) {
     bot.botAttackCooldown = atkRecovery;
     bot.botTactic = Math.random() < 0.55 ? 'retreat' : 'observe';
     bot.botTacticTimer = 28 + Math.floor(Math.random() * 24);
@@ -588,6 +542,26 @@ function stepPhysics() {
 
   if (game.announcementTimer > 0) game.announcementTimer--;
 
+  // Animations des écrans Carte de France -> Écran VS -> Intro Combat
+  if (game.screen === 'map') {
+    game.phaseTimer--;
+    if (game.phaseTimer > 35 && game.tick % 12 === 0) {
+      sound.playMapStep();
+    }
+    if (game.phaseTimer <= 0) {
+      enterVsScreen();
+    }
+    return;
+  }
+
+  if (game.screen === 'vs') {
+    game.phaseTimer--;
+    if (game.phaseTimer <= 0) {
+      enterIntroRound();
+    }
+    return;
+  }
+
   // Particules & textes flottants
   for (let i = game.particles.length - 1; i >= 0; i--) {
     const p = game.particles[i];
@@ -604,7 +578,6 @@ function stepPhysics() {
     if (ft.life <= 0) game.floatingTexts.splice(i, 1);
   }
 
-  // Gestion des transitions d'états
   if (game.screen === 'intro') {
     game.phaseTimer--;
     if (game.phaseTimer === 32) {
@@ -619,7 +592,6 @@ function stepPhysics() {
 
   if (game.screen === 'roundOver') {
     game.phaseTimer--;
-    // Gravité pour le combattant KO
     game.fighters.forEach(f => {
       f.vy += 0.85;
       f.y = Math.min(FLOOR_Y, f.y + f.vy);
@@ -642,7 +614,7 @@ function stepPhysics() {
 
   if (game.screen !== 'fight') return;
 
-  // Timer de manche (~60 ticks = 1 seconde)
+  // Timer de manche
   game.timer = Math.max(0, game.timer - 1 / 60);
   if (game.timer <= 0) {
     const [p1, p2] = game.fighters;
@@ -659,8 +631,8 @@ function stepPhysics() {
       sp.hitApplied = true;
       const attacker = game.fighters[sp.attackerIdx];
       const defender = game.fighters[1 - sp.attackerIdx];
-      if (Math.abs(attacker.x - defender.x) < 1050) {
-        applyHit(sp.attackerIdx, attacker.def.specialDmg, 14, true);
+      if (Math.abs(attacker.x - defender.x) < 1100) {
+        applyHit(sp.attackerIdx, attacker.def.specialDmg, 14, true, 'special');
       }
     }
     if (sp.timer >= sp.duration) {
@@ -668,17 +640,16 @@ function stepPhysics() {
     }
   }
 
-  // Entrées joueurs / Bot (suspendues durant les 20 premières frames de Super Freeze)
-  const freezeActive = game.specialFx && game.specialFx.timer < 20;
+  const freezeActive = game.specialFx && game.specialFx.timer < 18;
   if (!freezeActive) {
     updateHumanFighter(0);
     if (game.mode === 'local') updateHumanFighter(1);
     else updateBotFighter();
   }
 
-  // Physique & Collisions d'attaques
+  // Physique & Collisions d'attaques avec portée alignée sur les sprites pixel-art
   game.fighters.forEach((f, idx) => {
-    if (f.trailHp > f.hp) f.trailHp = Math.max(f.hp, f.trailHp - 0.5);
+    if (f.trailHp > f.hp) f.trailHp = Math.max(f.hp, f.trailHp - 0.55);
     if (f.comboTimer > 0) f.comboTimer--;
     else f.comboCount = 0;
 
@@ -686,13 +657,13 @@ function stepPhysics() {
       f.stateTimer--;
       if (f.state === 'light' || f.state === 'heavy') {
         const opp = game.fighters[1 - idx];
-        const reach = f.state === 'light' ? 168 : 198;
-        const active = f.state === 'light' ? f.stateTimer >= 7 && f.stateTimer <= 13 : f.stateTimer >= 10 && f.stateTimer <= 18;
-        const facingTarget = (f.facing === 1 && opp.x >= f.x - 25) || (f.facing === -1 && opp.x <= f.x + 25);
-        if (active && !f.attackDidHit && facingTarget && Math.abs(f.x - opp.x) <= reach && Math.abs(f.y - opp.y) <= 155) {
+        const reach = f.state === 'light' ? 250 : 285;
+        const active = f.state === 'light' ? f.stateTimer >= 5 && f.stateTimer <= 15 : f.stateTimer >= 8 && f.stateTimer <= 22;
+        const facingTarget = (f.facing === 1 && opp.x >= f.x - 45) || (f.facing === -1 && opp.x <= f.x + 45);
+        if (active && !f.attackDidHit && facingTarget && Math.abs(f.x - opp.x) <= reach && Math.abs(f.y - opp.y) <= 185) {
           f.attackDidHit = true;
           const dmg = f.state === 'light' ? f.def.lightDmg : f.def.heavyDmg;
-          applyHit(idx, dmg, f.state === 'light' ? 6 : 11, false);
+          applyHit(idx, dmg, f.state === 'light' ? 7 : 12, false, f.state);
         }
       }
       if (f.stateTimer === 0 && f.state !== 'ko') {
@@ -714,10 +685,10 @@ function stepPhysics() {
     }
   });
 
-  // Répulsion mutuelle pour éviter la superposition totale
+  // Répulsion mutuelle
   const [f1, f2] = game.fighters;
-  if (Math.abs(f1.x - f2.x) < 112 && Math.abs(f1.y - f2.y) < 130) {
-    const push = (112 - Math.abs(f1.x - f2.x)) * 0.5;
+  if (Math.abs(f1.x - f2.x) < 115 && Math.abs(f1.y - f2.y) < 145) {
+    const push = (115 - Math.abs(f1.x - f2.x)) * 0.5;
     if (f1.x <= f2.x) {
       f1.x = Math.max(135, f1.x - push);
       f2.x = Math.min(STAGE_W - 135, f2.x + push);
@@ -734,15 +705,26 @@ function render() {
     ctx.translate((Math.random() - 0.5) * game.shake, (Math.random() - 0.5) * game.shake);
   }
 
-  drawArena(ctx, game.arena, game.tick);
-  drawFighter(ctx, game.fighters[0], game.tick);
-  drawFighter(ctx, game.fighters[1], game.tick + 15);
-  drawSpecialFX(ctx, game.specialFx, game.fighters);
-  drawEffects(ctx, game.particles, game.floatingTexts);
+  if (game.screen === 'menu') {
+    drawTitleScreen(ctx, game);
+  } else if (game.screen === 'select') {
+    drawSelectScreen(ctx, game);
+  } else if (game.screen === 'map') {
+    drawFranceMapScreen(ctx, game);
+  } else if (game.screen === 'vs') {
+    drawVsScreen(ctx, game);
+  } else {
+    drawArena(ctx, game.arena, game.tick);
+    drawFighter(ctx, game.fighters[0], game.tick);
+    drawFighter(ctx, game.fighters[1], game.tick + 15);
+    drawSpecialFX(ctx, game.specialFx, game.fighters);
+    drawEffects(ctx, game.particles, game.floatingTexts);
 
-  if (game.screen === 'intro' || game.screen === 'fight' || game.screen === 'roundOver') {
-    drawHUD(ctx, game);
+    if (game.screen === 'intro' || game.screen === 'fight' || game.screen === 'roundOver') {
+      drawHUD(ctx, game);
+    }
   }
+
   ctx.restore();
 }
 
@@ -752,26 +734,207 @@ function gameLoop() {
   requestAnimationFrame(gameLoop);
 }
 
-// --- ÉVÉNEMENTS CLAVIER & BOUTONS ---
-window.addEventListener('keydown', e => {
-  if (game.screen === 'fight' || game.screen === 'intro') {
-    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) {
-      e.preventDefault();
-    }
+// --- INTERACTIONS SOURIS SUR LE CANVAS ---
+function getCanvasCoords(e) {
+  const rect = canvas.getBoundingClientRect();
+  return {
+    x: ((e.clientX - rect.left) / rect.width) * STAGE_W,
+    y: ((e.clientY - rect.top) / rect.height) * STAGE_H
+  };
+}
+
+function hitRect(px, py, r) {
+  return px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h;
+}
+
+canvas.addEventListener('contextmenu', e => {
+  if (game.screen === 'select') e.preventDefault();
+});
+
+canvas.addEventListener('mousedown', e => {
+  sound.unlock();
+  if (!sound.muted && sound.musicMode !== 'none') {
+    // Relance le séquenceur dès la première interaction utilisateur
+    const mode = sound.musicMode;
+    sound.setMusicMode('none');
+    sound.setMusicMode(mode);
   }
+  canvas.focus();
+
+  const { x, y } = getCanvasCoords(e);
+
+  if (game.screen === 'menu') {
+    sound.playConfirm();
+    setScreen('select');
+    return;
+  }
+
+  if (game.screen === 'select') {
+    const layout = getSelectLayout();
+
+    if (hitRect(x, y, layout.modeBadgeRect)) {
+      game.mode = game.mode === 'bot' ? 'local' : 'bot';
+      game.selectTarget = game.mode === 'local' ? 2 : 1;
+      sound.playMenu();
+      updateHeaderAndBars();
+      return;
+    }
+
+    if (hitRect(x, y, layout.p2PanelRect)) {
+      if (game.mode === 'bot' && y >= layout.p2PanelRect.y + 135) {
+        game.selectTarget = 2;
+      } else {
+        game.mode = game.mode === 'bot' ? 'local' : 'bot';
+        game.selectTarget = game.mode === 'local' ? 2 : 1;
+      }
+      sound.playMenu();
+      updateHeaderAndBars();
+      return;
+    }
+
+    for (const ar of layout.arenaRects) {
+      if (hitRect(x, y, ar)) {
+        game.arena = ar.id;
+        sound.playMenu();
+        updateHeaderAndBars();
+        return;
+      }
+    }
+
+    for (const fr of layout.fighterRects) {
+      if (hitRect(x, y, fr)) {
+        sound.playMenu();
+        if (e.button === 2 || game.selectTarget === 2) {
+          game.p2Choice = fr.id;
+          game.selectTarget = 1;
+        } else {
+          game.p1Choice = fr.id;
+          if (game.mode === 'local') game.selectTarget = 2;
+        }
+        resetRoundFighters(false);
+        return;
+      }
+    }
+
+    if (hitRect(x, y, layout.launchBtnRect)) {
+      startTourAndFight();
+      return;
+    }
+    return;
+  }
+
+  if (game.screen === 'map') {
+    enterVsScreen();
+    return;
+  }
+
+  if (game.screen === 'vs') {
+    enterIntroRound();
+  }
+});
+
+// --- ÉVÉNEMENTS CLAVIER ---
+function stepFighterChoice(playerIdx, dir) {
+  const curId = playerIdx === 1 ? game.p1Choice : game.p2Choice;
+  const idx = FIGHTER_ORDER.indexOf(curId);
+  const next = FIGHTER_ORDER[(idx + dir + FIGHTER_ORDER.length) % FIGHTER_ORDER.length];
+  if (playerIdx === 1) game.p1Choice = next;
+  else game.p2Choice = next;
+  sound.playMenu();
+  resetRoundFighters(false);
+}
+
+window.addEventListener('keydown', e => {
+  sound.unlock();
+
+  const activeTag = document.activeElement?.tagName;
+  const isFormFocus = activeTag === 'BUTTON' || activeTag === 'SELECT';
+
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code) && !isFormFocus) {
+    e.preventDefault();
+  }
+
   if (e.repeat) return;
   keys.add(e.code);
 
+  // Navigation Écran Titre
+  if (game.screen === 'menu') {
+    if (!isFormFocus && (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space' || e.code === 'KeyF')) {
+      e.preventDefault();
+      sound.playConfirm();
+      setScreen('select');
+    }
+    return;
+  }
+
+  // Navigation Écran Sélection
+  if (game.screen === 'select') {
+    if (e.code === 'Tab') {
+      e.preventDefault();
+      game.selectTarget = game.selectTarget === 1 ? 2 : 1;
+      sound.playMenu();
+      return;
+    }
+    if (e.code === 'Digit2' || e.code === 'ShiftRight') {
+      game.mode = game.mode === 'bot' ? 'local' : 'bot';
+      sound.playMenu();
+      updateHeaderAndBars();
+      return;
+    }
+    if (e.code === 'KeyA' || e.code === 'KeyQ') {
+      stepFighterChoice(1, -1);
+      return;
+    }
+    if (e.code === 'KeyD') {
+      stepFighterChoice(1, 1);
+      return;
+    }
+    if (e.code === 'ArrowLeft') {
+      stepFighterChoice(game.mode === 'local' ? 2 : game.selectTarget, -1);
+      return;
+    }
+    if (e.code === 'ArrowRight') {
+      stepFighterChoice(game.mode === 'local' ? 2 : game.selectTarget, 1);
+      return;
+    }
+    if (!isFormFocus && (e.code === 'Enter' || e.code === 'NumpadEnter')) {
+      e.preventDefault();
+      startTourAndFight();
+    }
+    return;
+  }
+
+  // Skip rapide Carte de France / Écran VS
+  if (game.screen === 'map' && !isFormFocus && (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space')) {
+    e.preventDefault();
+    enterVsScreen();
+    return;
+  }
+  if (game.screen === 'vs' && !isFormFocus && (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space')) {
+    e.preventDefault();
+    enterIntroRound();
+    return;
+  }
+
   if (game.screen !== 'fight') return;
 
-  if (e.code === 'KeyF') triggerAttack(0, 'light');
-  else if (e.code === 'KeyG') triggerAttack(0, 'heavy');
-  else if (e.code === 'KeyR' || e.code === 'Space') triggerAttack(0, 'special');
+  // Touches de Combat : Frapper = F (G lourd), Sauter = ESPACE, Coup Spécial = ENTRÉE
+  if (e.code === 'KeyF') {
+    triggerAttack(0, 'light');
+  } else if (e.code === 'KeyG') {
+    triggerAttack(0, 'heavy');
+  } else if (e.code === 'Enter' || (game.mode === 'bot' && e.code === 'NumpadEnter')) {
+    e.preventDefault();
+    triggerAttack(0, 'special');
+  }
 
   if (game.mode === 'local') {
     if (e.code === 'KeyK') triggerAttack(1, 'light');
     else if (e.code === 'KeyL') triggerAttack(1, 'heavy');
-    else if (e.code === 'KeyO' || e.code === 'Enter') triggerAttack(1, 'special');
+    else if (e.code === 'KeyO' || e.code === 'ShiftRight' || e.code === 'NumpadEnter') {
+      e.preventDefault();
+      triggerAttack(1, 'special');
+    }
   }
 });
 
@@ -783,20 +946,22 @@ window.addEventListener('blur', () => {
   keys.clear();
 });
 
-// Événements Interface
+// Événements Barre Supérieure & Overlay Fin de Match
 modeBotHeaderBtn.addEventListener('click', () => {
+  sound.unlock();
   game.mode = 'bot';
+  game.selectTarget = 1;
   sound.playMenu();
   updateHeaderAndBars();
-  if (game.screen === 'select') renderSelectionUI();
   modeBotHeaderBtn.blur();
 });
 
 modeLocalHeaderBtn.addEventListener('click', () => {
+  sound.unlock();
   game.mode = 'local';
+  game.selectTarget = 2;
   sound.playMenu();
   updateHeaderAndBars();
-  if (game.screen === 'select') renderSelectionUI();
   modeLocalHeaderBtn.blur();
 });
 
@@ -806,14 +971,16 @@ botDiffSelect.addEventListener('change', e => {
 });
 
 openSelectHeaderBtn.addEventListener('click', () => {
+  sound.unlock();
   sound.playMenu();
   setScreen('select');
   openSelectHeaderBtn.blur();
 });
 
 audioToggleBtn.addEventListener('click', () => {
+  sound.unlock();
   const muted = sound.toggleMute();
-  audioToggleBtn.textContent = muted ? 'Audio : OFF' : 'Audio : ON';
+  audioToggleBtn.textContent = muted ? 'Musique 8-bit : OFF' : 'Musique 8-bit : ON';
   if (!muted) sound.playMenu();
   audioToggleBtn.blur();
 });
@@ -827,48 +994,27 @@ fullscreenBtn.addEventListener('click', () => {
   fullscreenBtn.blur();
 });
 
-startSoloBtn.addEventListener('click', () => {
-  game.mode = 'bot';
-  startMatch();
+rematchBtn.addEventListener('click', () => {
+  sound.unlock();
+  game.roundNumber = 1;
+  resetRoundFighters(false);
+  enterIntroRound();
 });
 
-startLocalBtn.addEventListener('click', () => {
-  game.mode = 'local';
-  startMatch();
-});
-
-menuToSelectBtn.addEventListener('click', () => {
-  sound.playMenu();
-  setScreen('select');
-});
-
-selectTargetP1Btn.addEventListener('click', () => {
-  game.selectTarget = 1;
-  renderSelectionUI();
-});
-
-selectTargetP2Btn.addEventListener('click', () => {
-  game.selectTarget = 2;
-  renderSelectionUI();
-});
-
-launchFightBtn.addEventListener('click', startMatch);
-backToMenuBtn.addEventListener('click', () => {
-  sound.playMenu();
-  setScreen('menu');
-});
-
-rematchBtn.addEventListener('click', startMatch);
 changeSetupBtn.addEventListener('click', () => {
+  sound.unlock();
   sound.playMenu();
   setScreen('select');
 });
+
 matchToMenuBtn.addEventListener('click', () => {
+  sound.unlock();
   sound.playMenu();
   setScreen('menu');
 });
 
 triggerSpecialP1Btn.addEventListener('click', () => {
+  sound.unlock();
   if (game.fighters[0] && game.fighters[0].superMeter < 100) {
     game.fighters[0].superMeter = 100;
   }
@@ -877,6 +1023,7 @@ triggerSpecialP1Btn.addEventListener('click', () => {
 });
 
 triggerSpecialP2Btn.addEventListener('click', () => {
+  sound.unlock();
   if (game.fighters[1] && game.fighters[1].superMeter < 100) {
     game.fighters[1].superMeter = 100;
   }
@@ -885,14 +1032,15 @@ triggerSpecialP2Btn.addEventListener('click', () => {
 });
 
 refillSuperBtn.addEventListener('click', () => {
+  sound.unlock();
   game.fighters.forEach(f => {
     f.superMeter = 100;
   });
-  sound.playMenu();
+  sound.playConfirm();
   refillSuperBtn.blur();
 });
 
-// Démarrage
+// Démarrage sur l'Écran Titre
 buildQuickArenaBar();
 setScreen('menu');
 gameLoop();

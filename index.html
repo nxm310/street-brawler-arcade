@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Street Brawler Arcade — 6 Combattants &amp; 5 Arènes</title>
+  <title>Street Brawler Arcade — La Tournée des Légendes (6 Combattants &amp; 6 Arènes)</title>
+  <link rel="preload" as="image" href="assets/ui/title_screen.png" />
+  <link rel="preload" as="image" href="assets/ui/france_map.png" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
@@ -26,8 +28,8 @@
         <option value="hard">Difficile</option>
       </select>
 
-      <button id="openSelectHeaderBtn" type="button" class="btn">Combattants &amp; Arènes</button>
-      <button id="audioToggleBtn" type="button" class="btn">Audio : ON</button>
+      <button id="openSelectHeaderBtn" type="button" class="btn">Combattants &amp; Carte</button>
+      <button id="audioToggleBtn" type="button" class="btn">Musique 8-bit : ON</button>
       <button id="fullscreenBtn" type="button" class="btn">Plein Écran</button>
     </div>
   </header>
@@ -35,51 +37,6 @@
   <main class="main-wrap">
     <div id="stageContainer" class="stage-container">
       <canvas id="gameCanvas" width="1280" height="720" tabindex="0" aria-label="Arène de combat Street Brawler Arcade"></canvas>
-
-      <!-- Écran Titre / Menu Principal -->
-      <section id="menuOverlay" class="overlay" aria-labelledby="menuTitle">
-        <div class="overlay-card">
-          <h2 id="menuTitle">PRÊT AU COMBAT ?</h2>
-          <p class="overlay-sub">
-            6 combattants uniques avec chacun leur Coup Spécial et 5 arènes thématiques :
-            Call of Duty, Star Citizen, Classe Techno, Viking WoW &amp; Motos Motard.
-          </p>
-          <div class="overlay-actions">
-            <button id="startSoloBtn" type="button" class="btn btn-primary btn-lg">MODE SOLO (1J vs BOT)</button>
-            <button id="startLocalBtn" type="button" class="btn btn-secondary btn-lg">MODE 2 JOUEURS LOCAL</button>
-            <button id="menuToSelectBtn" type="button" class="btn btn-lg">CHOISIR COMBATTANTS &amp; ARÈNE</button>
-          </div>
-        </div>
-      </section>
-
-      <!-- Écran de Sélection des 6 Personnages & 5 Arènes -->
-      <section id="selectOverlay" class="overlay" aria-labelledby="selectTitle" hidden>
-        <div class="overlay-card overlay-card-wide">
-          <div class="select-header">
-            <h2 id="selectTitle">SÉLECTION DES COMBATTANTS &amp; DE L'ARÈNE</h2>
-            <div class="segmented" role="group" aria-label="Cible de sélection">
-              <button id="selectTargetP1Btn" type="button" class="btn is-active">Choisir J1</button>
-              <button id="selectTargetP2Btn" type="button" class="btn">Choisir BOT</button>
-            </div>
-          </div>
-
-          <div class="select-summaries">
-            <div id="p1SelectedSummary"></div>
-            <div id="p2SelectedSummary"></div>
-          </div>
-
-          <h3 class="select-section-title">1. Combattants (6)</h3>
-          <div id="fighterGrid" class="fighter-grid"></div>
-
-          <h3 class="select-section-title">2. Environnement / Arène (5)</h3>
-          <div id="arenaGrid" class="arena-grid"></div>
-
-          <div class="overlay-actions">
-            <button id="launchFightBtn" type="button" class="btn btn-primary btn-lg">LANCER LE COMBAT !</button>
-            <button id="backToMenuBtn" type="button" class="btn btn-lg">Retour</button>
-          </div>
-        </div>
-      </section>
 
       <!-- Écran Fin de Match -->
       <section id="matchOverOverlay" class="overlay" aria-labelledby="matchWinnerTitle" hidden>
@@ -89,30 +46,30 @@
           <div class="overlay-actions">
             <button id="rematchBtn" type="button" class="btn btn-primary btn-lg">REJOUER</button>
             <button id="changeSetupBtn" type="button" class="btn btn-secondary btn-lg">CHANGER COMBATTANTS / ARÈNE</button>
-            <button id="matchToMenuBtn" type="button" class="btn btn-lg">MENU PRINCIPAL</button>
+            <button id="matchToMenuBtn" type="button" class="btn btn-lg">ÉCRAN TITRE</button>
           </div>
         </div>
       </section>
     </div>
 
-    <!-- Barre de commandes rapides & guide clavier -->
+    <!-- Barre d'arènes en direct & commandes clavier -->
     <section class="control-dock" aria-label="Commandes rapides et contrôles clavier">
       <div class="dock-row">
         <div class="arena-bar">
-          <span class="dock-label">Arène en direct :</span>
+          <span class="dock-label">Arènes en direct :</span>
           <div id="quickArenaBar" class="arena-bar"></div>
         </div>
 
         <div class="action-buttons">
-          <button id="triggerSpecialP1Btn" type="button" class="btn btn-primary">⚡ Coup Spécial J1</button>
-          <button id="triggerSpecialP2Btn" type="button" class="btn btn-secondary">⚡ Coup Spécial J2</button>
-          <button id="refillSuperBtn" type="button" class="btn">🔋 Recharger Super</button>
+          <button id="triggerSpecialP1Btn" type="button" class="btn btn-primary">⚡ Spécial J1</button>
+          <button id="triggerSpecialP2Btn" type="button" class="btn btn-secondary">⚡ Spécial J2</button>
+          <button id="refillSuperBtn" type="button" class="btn">🔋 Charger Spécial 100%</button>
         </div>
       </div>
 
       <div class="controls-guide">
         <div>
-          <strong>J1 (AZERTY / QWERTY) :</strong> Q/A et D déplacer · Z/W sauter · S garde · F coup léger · G coup lourd · <strong>R ou Espace : Coup Spécial</strong>
+          <strong>J1 :</strong> Q/A &amp; D déplacer · <strong>ESPACE : Sauter</strong> · S garde · <strong>F : Frapper</strong> (G lourd) · <strong>ENTRÉE : Coup Spécial</strong>
         </div>
         <div id="controlsP2Text">
           BOT IA : contrôle automatique (difficulté réglable en haut)
