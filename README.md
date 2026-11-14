@@ -1,14 +1,14 @@
 # Street Brawler Arcade
 
-Jeu de combat 2D **16-bit Néo-Arcade** jouable directement dans le navigateur (Canvas 1280×720), avec musiques chiptune **8-bit** synthétisées via Web Audio API, sprites et décors pixel-art 16-bit, mode **Solo vs Bot IA tactique** et mode **2 Joueurs en local**.
+Jeu de combat 2D **16-bit Néo-Arcade** jouable directement dans le navigateur (Canvas 1280×720), avec musiques **16-bit** filtrées et chaleureuses synthétisées via Web Audio API, sprites multi-poses SF2 pixel-art (`idle`, `walk`, `crouch`, `jump`, `punch`, `kick`, `parry`, `special`), **Mode Veille / Attract Mode** automatique, mode **Solo vs Bot IA tactique** et mode **2 Joueurs en local**.
 
 ---
 
 ## Écrans & Parcours Arcade
 
-1. **Écran Titre (`menu`)** : visuel d’arcade 16-bit réunissant les 6 combattants, logo **STREET BRAWLER ARCADE**, `APPUIE SUR START`.
+1. **Écran Titre (`menu`)** : visuel d’arcade 16-bit réunissant les 6 combattants, logo **STREET BRAWLER ARCADE**, `APPUIE SUR START` (lance automatiquement le **Mode Veille** au bout de 10 s d'inactivité ou via le bouton `🎬 Mode Veille` / touche `V`).
 2. **Sélection des combattants (`CHOISIS TON COMBATTANT`)** : portraits, ville et région française d’origine, choix d’arène et passage direct en mode `1J vs BOT` ou `2J LOCAL`.
-3. **Carte de France animée (`map`)** : itinéraire entre la ville du J1 et celle de son adversaire avec pointillés jaunes animés en direct.
+3. **Carte de France unique stylisée (`map`)** : carte de France grand format (avec Corse, fleuves, montagnes et décors 16-bit des régions du jeu) reliant les villes des combattants par pointillés animés.
 4. **Écran `VS` (`vs`)** : face-à-face en grand format avant le début du combat.
 
 ---
@@ -17,12 +17,12 @@ Jeu de combat 2D **16-bit Néo-Arcade** jouable directement dans le navigateur (
 
 | Combattant | Origine France | Rôle | Coup Spécial | Effet |
 | --- | --- | --- | --- | --- |
-| **GOLDOHRACK** | Château-Thierry (Picardie) | Le Mazinger | ⚡ Fulguro-Poing Rocket | Éclairs Cornofulgure + poing-fusée supersonique |
+| **GOLDOHRACK** | Château-Thierry (Picardie) | Le Mazinger | 🚀 Fulguro-Poing Missile | Éclairs Cornofulgure + avant-bras détaché fusant comme un missile |
 | **M3G4TRONCH3** | Laon (Picardie) | Le Robot | ⚡ Rayon Orbital Mégatron | Anneaux d’énergie + laser thoracique & frappe orbitale |
-| **MADCHAT** | Reims (Pays du Champagne) | Le Warrior | ⚡ Épée Infernale & Furie Féline | Grand croissant d’épée en feu pixel-art + gerbe de braises |
-| **DarkMada & Golden** | Paris (Île-de-France) | Motard & Golden Retriever | 💖 Bisous Golden & Jouet Pouic | Attaque toute gentille : pluie de cœurs, balle de tennis & os jouet |
-| **LURCK** | Chartres (Eure-et-Loir) | Le Hibou Nocturne | ⚡ Éclipse & Griffes Nocturnes | Pluie de croissants dorés lunaires + serres spectrales |
-| **KOLL** | Toulouse (Occitanie) | Homme Électrique Nucléaire | ⚡ Supernova Tesla-Atomique | Halo radioactif vert + arcs électriques Tesla bleus |
+| **MADCHAT** | Reims (Pays du Champagne) | Le Warrior | ⚡ Furie Féline | Grand croissant d’épée en feu pixel-art + gerbe de braises |
+| **DarkMada & Sushi** | Paris (Île-de-France) | Motard & Golden Retriever Sushi | 🐕 Sushi Solo : Bisous & Peluche | Sushi attaque tout seul en mêlant pluie de Bisous ❤️, ourson en peluche, canard & balle Pouic |
+| **LURCK** | Chartres (Eure-et-Loir) | Le Hibou Nocturne | ⚡ Éclipse Nocturne | Pluie de croissants dorés lunaires + serres spectrales |
+| **KOLL** | Toulouse (Occitanie) | Homme Électrique Nucléaire | 🐰 Lapin-Aimant Tesla | Koll enfile ses oreilles de lapin pendant le super-pouvoir pour attirer les méchants avant la décharge Tesla |
 
 ---
 
@@ -49,9 +49,12 @@ Jeu de combat 2D **16-bit Néo-Arcade** jouable directement dans le navigateur (
 | --- | --- | --- |
 | Déplacer | `Q` / `A` et `D` (ou `←`/`→` en Solo) | `←` et `→` |
 | **Sauter** | `Espace` (ou `Z`/`W`) | `↑` |
-| Garde | `S` | `↓` |
-| **Frapper (léger / lourd)** | `F` / `G` | `K` / `L` |
+| **Se baisser** | `S` (garde si recul + attaque ennemie) | `↓` |
+| **Coup de Poing (léger / fort)** | `F` / `R` | `K` |
+| **Coup de Pied / Balayette** | `G` (ou `H`) · `S + G` Balayette | `L` · `↓ + L` Balayette |
+| **Parade (Parry / Parade Parfaite)** | `C` ou `Maj Gauche` | `M` ou `J` |
 | **Coup Spécial** | `Entrée` | `Maj Droite`, `O` ou `Entrée Num.` |
+| **Mode Veille (Attract Mode)** | `V` (sur Menu / Sélection) ou automatique après 10s | — |
 
 ---
 

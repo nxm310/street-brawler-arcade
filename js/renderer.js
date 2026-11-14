@@ -23,10 +23,23 @@ ARENA_ORDER.forEach(id => {
 FIGHTER_ORDER.forEach(id => {
   ASSETS.fighters[id] = {
     idle: loadImage(`assets/fighters/${id}_idle.png`),
+    idle2: loadImage(`assets/fighters/${id}_idle2.png`),
+    walk: loadImage(`assets/fighters/${id}_walk.png`),
+    crouch: loadImage(`assets/fighters/${id}_crouch.png`),
+    jump: loadImage(`assets/fighters/${id}_jump.png`),
     attack: loadImage(`assets/fighters/${id}_attack.png`),
+    kick: loadImage(`assets/fighters/${id}_kick.png`),
+    parry: loadImage(`assets/fighters/${id}_parry.png`),
     portrait: loadImage(`assets/fighters/${id}_portrait.png`)
   };
 });
+ASSETS.fighters.koll.special = loadImage('assets/fighters/koll_special.png');
+ASSETS.fighters.goldohrack.special = loadImage('assets/fighters/goldohrack_special.png');
+ASSETS.fighters.darkmada.special = loadImage('assets/fighters/darkmada_special.png');
+ASSETS.extras = {
+  goldohrackFist: loadImage('assets/fighters/goldohrack_fist.png'),
+  sushiSolo: loadImage('assets/fighters/sushi_solo.png')
+};
 
 ASSETS.ui.titleScreen = loadImage('assets/ui/title_screen.png');
 ASSETS.ui.franceMap = loadImage('assets/ui/france_map.png');
@@ -220,8 +233,33 @@ export function drawFighter(ctx, f, t) {
   const pack = ASSETS.fighters[f.id];
   if (!pack || !pack.idle.complete || pack.idle.naturalWidth === 0) return;
 
-  const isAttacking = f.state === 'light' || f.state === 'heavy' || f.state === 'special';
-  const sprite = isAttacking && pack.attack.complete && pack.attack.naturalWidth > 0 ? pack.attack : pack.idle;
+  const isAtkPunch = f.state === 'light' || f.state === 'heavy' || f.state === 'jump_punch';
+  const isAtkKick = f.state === 'kick' || f.state === 'sweep' || f.state === 'jump_kick';
+  const isGuarding = f.state === 'block' || f.state === 'parry';
+  const isJumping = f.y < FLOOR_Y - 2 || f.state === 'jump' || f.state === 'jump_punch' || f.state === 'jump_kick';
+
+  let sprite = pack.idle;
+  if (f.state === 'special') {
+    if ((f.id === 'koll' || f.id === 'goldohrack' || f.id === 'darkmada') && pack.special && pack.special.complete && pack.special.naturalWidth > 0) {
+      sprite = pack.special;
+    } else if (pack.attack && pack.attack.complete && pack.attack.naturalWidth > 0) {
+      sprite = pack.attack;
+    }
+  } else if (isAtkKick && pack.kick && pack.kick.complete && pack.kick.naturalWidth > 0) {
+    sprite = pack.kick;
+  } else if (isAtkPunch && pack.attack && pack.attack.complete && pack.attack.naturalWidth > 0) {
+    sprite = pack.attack;
+  } else if (isGuarding && pack.parry && pack.parry.complete && pack.parry.naturalWidth > 0) {
+    sprite = pack.parry;
+  } else if (f.state === 'crouch' && pack.crouch && pack.crouch.complete && pack.crouch.naturalWidth > 0) {
+    sprite = pack.crouch;
+  } else if (isJumping && pack.jump && pack.jump.complete && pack.jump.naturalWidth > 0) {
+    sprite = pack.jump;
+  } else if (f.state === 'walk' && pack.walk && pack.walk.complete && pack.walk.naturalWidth > 0) {
+    sprite = Math.floor(t / 7) % 2 === 0 ? pack.walk : pack.idle;
+  } else if (pack.idle2 && pack.idle2.complete && pack.idle2.naturalWidth > 0) {
+    sprite = Math.floor(t / 15) % 2 === 0 ? pack.idle : pack.idle2;
+  }
 
   const idleW = pack.idle.width;
   const drawW = sprite.width;
@@ -241,19 +279,28 @@ export function drawFighter(ctx, f, t) {
 
   ctx.scale(f.facing, 1);
 
-  if (f.state === 'ko') {
+  if (f.state === 'ko' || f.state === 'down') {
     ctx.translate(0, -24);
     ctx.rotate(-Math.PI / 2);
+  } else if (f.state === 'sweep') {
+    ctx.translate(0, -18);
+    ctx.rotate(0.18);
+  } else if (isJumping && Math.abs(f.vx) > 2 && f.state === 'jump') {
+    ctx.translate(0, -drawH * 0.45);
+    ctx.rotate((f.vx * f.facing > 0 ? 1 : -1) * 0.08);
+    ctx.translate(0, drawH * 0.45);
   }
 
   // Rebond global monobloc entier sur grille de 3px (zéro déchirement)
   let bobY = 0;
   if (f.state === 'walk') {
     bobY = -Math.round(Math.abs(Math.sin(t * 0.28)) * 2) * 3;
-  } else if (f.state === 'idle') {
+  } else if (f.state === 'idle' && sprite === pack.idle) {
     bobY = Math.round(Math.sin(t * 0.14)) * 3;
-  } else if (f.state === 'crouch') {
-    bobY = 24;
+  } else if (f.state === 'crouch' && sprite === pack.idle) {
+    bobY = 30;
+  } else if (f.state === 'sweep') {
+    bobY = 54;
   }
 
   const anchorX = Math.round(-idleW * 0.44);
@@ -274,8 +321,30 @@ export function drawFighter(ctx, f, t) {
   ctx.drawImage(sprite, anchorX, drawY, drawW, drawH);
   ctx.globalAlpha = 1;
 
-  // Bouclier de garde 100% pixelisé
-  if (f.state === 'block') {
+  // Arc d'impact visuel sur les coups de pied, balayettes et parades
+  if (f.state === 'sweep' && f.stateTimer > 8) {
+    ctx.fillStyle = '#fde047';
+    ctx.fillRect(Math.round(idleW * 0.25), -24, 96, 8);
+    ctx.fillStyle = '#38bdf8';
+    ctx.fillRect(Math.round(idleW * 0.35), -14, 72, 6);
+  } else if ((f.state === 'kick' || f.state === 'jump_kick') && f.stateTimer > 6) {
+    ctx.fillStyle = 'rgba(250, 204, 21, 0.72)';
+    ctx.fillRect(Math.round(drawW * 0.42), -Math.round(drawH * 0.56), 24, 14);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(Math.round(drawW * 0.46), -Math.round(drawH * 0.54), 14, 8);
+  } else if (f.state === 'parry') {
+    const px = Math.round(idleW * 0.34);
+    const py = -Math.round(drawH * 0.54);
+    const pulse = 36 + (t % 6) * 4;
+    ctx.strokeStyle = f.parryWindow > 0 ? '#fde047' : '#38bdf8';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(px, py, pulse, -Math.PI * 0.48, Math.PI * 0.48);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+    ctx.fillStyle = 'rgba(253, 224, 71, 0.26)';
+    ctx.fillRect(px - 10, py - 70, 26, 140);
+  } else if (f.state === 'block') {
     const bx = Math.round(idleW * 0.32);
     const by = -Math.round(drawH * 0.86);
     const bh = Math.round(drawH * 0.78);
@@ -288,6 +357,50 @@ export function drawFighter(ctx, f, t) {
     ctx.fillRect(bx + 17, by, 4, bh);
   }
 
+  ctx.restore();
+}
+
+function drawPixelPlushBear(ctx, cx, cy, scale = 4) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(scale, scale);
+  // Oreilles rondes
+  ctx.fillStyle = '#92400e';
+  ctx.fillRect(-5, -8, 3, 3);
+  ctx.fillRect(2, -8, 3, 3);
+  // Tête et corps ourson en peluche
+  ctx.fillStyle = '#b45309';
+  ctx.fillRect(-4, -7, 8, 6);
+  ctx.fillRect(-4, -1, 8, 6);
+  // Museau & ventre crème
+  ctx.fillStyle = '#fde68a';
+  ctx.fillRect(-2, -4, 4, 2);
+  ctx.fillRect(-2, 0, 4, 4);
+  // Petit nœud papillon rouge
+  ctx.fillStyle = '#ef4444';
+  ctx.fillRect(-2, -1, 4, 1);
+  // Yeux noirs brillants
+  ctx.fillStyle = '#09090b';
+  ctx.fillRect(-3, -5, 1, 1);
+  ctx.fillRect(2, -5, 1, 1);
+  ctx.fillRect(-1, -4, 2, 1);
+  ctx.restore();
+}
+
+function drawPixelDucky(ctx, cx, cy, scale = 4) {
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(scale, scale);
+  // Petit canard jaune pouic
+  ctx.fillStyle = '#facc15';
+  ctx.fillRect(-4, -5, 5, 5);
+  ctx.fillRect(-3, -1, 8, 4);
+  // Bec orange
+  ctx.fillStyle = '#f97316';
+  ctx.fillRect(1, -3, 3, 2);
+  // Oeil
+  ctx.fillStyle = '#09090b';
+  ctx.fillRect(-1, -4, 1, 1);
   ctx.restore();
 }
 
@@ -365,73 +478,158 @@ export function drawSpecialFX(ctx, specialFx, fighters) {
       ctx.fillRect(ex, ey, 8, 8);
     }
   } else if (attacker.id === 'darkmada') {
-    // Attaque toute gentille du Golden Retriever : Bisous (coeurs pixel-art), Os & Balle Pouic !
-    const joyX = Math.round(sx + (tx - sx) * Math.min(1, p * 1.3));
-    const bounceY = Math.round(FLOOR_Y - 75 - Math.abs(Math.sin(p * Math.PI * 3.5)) * 130);
+    // SUSHI SOLO : Sushi le Golden Retriever attaque tout seul — mélange de Bisous ♥ & Peluches (Ourson, Canard, Os, Balle) !
+    const rushP = p < 0.58 ? p / 0.58 : 1 - ((p - 0.58) / 0.42);
+    const sushiX = Math.round(sx + dir * 72 + (tx - sx - dir * 56) * rushP);
+    const sushiHop = Math.round(Math.abs(Math.sin(p * Math.PI * 3.5)) * 105);
+    const sushiY = FLOOR_Y - sushiHop;
 
-    // Balle de tennis qui rebondit + os jouet joyeux
-    drawPixelTennisBall(ctx, joyX, bounceY, 5);
+    // Ombre de Sushi au sol
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+    ctx.fillRect(sushiX - 52, FLOOR_Y - 10, 104, 12);
+
+    // Dessin de Sushi seul en train de bondir
+    const sushiImg = ASSETS.extras && ASSETS.extras.sushiSolo;
+    if (sushiImg && sushiImg.complete && sushiImg.naturalWidth > 0) {
+      ctx.save();
+      ctx.translate(sushiX, sushiY);
+      ctx.scale(dir, 1);
+      ctx.drawImage(sushiImg, -Math.round(sushiImg.width * 0.5), -sushiImg.height, sushiImg.width, sushiImg.height);
+      ctx.restore();
+    }
+
+    // Mélange Bisous (pluie de coeurs roses & rouges) + Peluches volantes (Ourson, Canard Pouic, Os, Balle) !
+    const joyX = Math.round(sx + dir * 65 + (tx - sx - dir * 30) * Math.min(1, p * 1.25));
+    drawPixelPlushBear(ctx, joyX - dir * 24, Math.round(FLOOR_Y - 125 - Math.abs(Math.sin(p * Math.PI * 3)) * 130), 4.5);
+    drawPixelDucky(ctx, Math.round(sx + dir * 40 + (tx - sx) * Math.min(1, p * 1.4)), Math.round(FLOOR_Y - 95 - Math.abs(Math.cos(p * Math.PI * 4)) * 95), 4);
+    drawPixelTennisBall(ctx, joyX, Math.round(FLOOR_Y - 75 - Math.abs(Math.sin(p * Math.PI * 3.5)) * 130), 5);
     drawPixelBone(ctx, Math.round(sx + (tx - sx) * Math.max(0, p - 0.15)), FLOOR_Y - 140 - Math.round(Math.sin(p * 8) * 36), 4);
 
-    // Pluie de cœurs roses et rouges pixel-art vers et autour de l'adversaire
-    for (let i = 0; i < 9; i++) {
-      const k = (p * 1.4 - i * 0.08 + 1) % 1;
-      const hx = Math.round(sx + dir * 70 + (tx - sx - dir * 50) * Math.min(1, p * 1.2 + (i % 3) * 0.1) + Math.sin(i * 2.1 + specialFx.timer * 0.15) * 44);
-      const hy = Math.round(FLOOR_Y - 65 - k * 210);
+    // Pluie de bisous ♥♥ autour de la cible et de Sushi
+    for (let i = 0; i < 10; i++) {
+      const k = (p * 1.45 - i * 0.08 + 1) % 1;
+      const hx = Math.round(sushiX + (tx - sushiX) * (i / 10) + Math.sin(i * 2.1 + specialFx.timer * 0.16) * 48);
+      const hy = Math.round(FLOOR_Y - 65 - k * 215);
       drawPixelHeart(ctx, hx, hy, i % 2 === 0 ? 4 : 3, i % 2 === 0 ? '#ec4899' : '#e11d48', '#fbcfe8');
     }
 
     ctx.font = 'bold 20px monospace';
     ctx.textAlign = 'center';
-    pxText(ctx, 'POUIC ! ♥ BISOUS !', tx, FLOOR_Y - 255 - Math.round(p * 30), '#fbcfe8', '#831843', 3);
+    pxText(ctx, 'SUSHI SOLO ! BISOUS ♥ & PELUCHES !', Math.round((sushiX + tx) * 0.5), FLOOR_Y - 260 - Math.round(p * 24), '#fbcfe8', '#831843', 3);
   } else if (attacker.id === 'goldohrack') {
-    // Éclairs Cornofulgure depuis les cornes + poing-fusée géant propulsé par flamme bleue
-    drawStepLightning(ctx, sx + dir * 20, FLOOR_Y - 290, tx, FLOOR_Y - 170, '#fef08a', '#f59e0b', 6, specialFx.timer);
-    drawStepLightning(ctx, sx - dir * 10, FLOOR_Y - 290, tx, FLOOR_Y - 210, '#e0f2fe', '#38bdf8', 5, specialFx.timer + 4);
+    // GOLDOHRACK — FULGURO-POING MISSILE : l'avant-bras se détache et file comme une fusée vers l'adversaire puis revient !
+    drawStepLightning(ctx, sx + dir * 18, FLOOR_Y - 285, tx, FLOOR_Y - 175, '#fef08a', '#f59e0b', 5, specialFx.timer);
+    drawStepLightning(ctx, sx - dir * 8, FLOOR_Y - 285, tx, FLOOR_Y - 215, '#e0f2fe', '#38bdf8', 4, specialFx.timer + 4);
 
-    const fistX = Math.round(sx + dir * 70 + (tx - sx - dir * 60) * Math.min(1, p * 1.45));
-    const fy = FLOOR_Y - 205;
-    // Jet bleu fusée pixelisé
-    const trailStart = dir === 1 ? sx + 40 : fistX;
-    const trailW = Math.max(16, Math.abs(fistX - (sx + dir * 40)));
+    const launchX = sx + dir * 68;
+    const targetX = tx - dir * 24;
+    const flyP = p < 0.62 ? (p / 0.62) : 1 - ((p - 0.62) / 0.38);
+    const fistX = Math.round(launchX + (targetX - launchX) * Math.min(1, flyP));
+    const fy = FLOOR_Y - 196;
+
+    // Traînée de propulseur fusée + panaches de fumée
+    const trailStart = dir === 1 ? Math.min(launchX, fistX) : Math.max(launchX, fistX);
+    const trailW = Math.max(24, Math.abs(fistX - launchX));
+    const tx0 = dir === 1 ? trailStart : fistX;
+    ctx.fillStyle = 'rgba(251, 146, 60, 0.32)';
+    ctx.fillRect(tx0, fy - 22, trailW, 44);
     ctx.fillStyle = '#0284c7';
-    ctx.fillRect(trailStart, fy - 16, trailW, 32);
+    ctx.fillRect(tx0, fy - 12, trailW, 24);
     ctx.fillStyle = '#e0f2fe';
-    ctx.fillRect(trailStart, fy - 6, trailW, 12);
+    ctx.fillRect(tx0, fy - 5, trailW, 10);
 
-    // Poing-fusée rouge & doré 16-bit
-    ctx.fillStyle = '#f97316';
-    ctx.fillRect(fistX - dir * 44 - 16, fy - 20, 32, 40);
-    ctx.fillStyle = '#dc2626';
-    ctx.fillRect(fistX - 34, fy - 24, 68, 48);
-    ctx.fillStyle = '#fde047';
-    ctx.fillRect(fistX - 34, fy - 24, 68, 6);
-    ctx.fillRect(fistX - 34, fy + 18, 68, 6);
-    ctx.fillStyle = '#991b1b';
-    ctx.fillRect(fistX + dir * 16 - 10, fy - 18, 20, 36);
-  } else if (attacker.id === 'koll') {
-    // Supernova verte radioactive + arcs électriques Tesla en escalier pixelisé
-    const rad = Math.round(48 + p * 360);
-    ctx.fillStyle = 'rgba(34, 197, 94, 0.25)';
-    ctx.fillRect(sx - rad, FLOOR_Y - 180 - Math.round(rad * 0.45), rad * 2, Math.round(rad * 0.9));
-    ctx.fillStyle = '#4ade80';
-    ctx.fillRect(sx - rad, FLOOR_Y - 180 - 12, rad * 2, 24);
-    ctx.fillStyle = '#dcfce7';
-    ctx.fillRect(sx - Math.round(rad * 0.6), FLOOR_Y - 180 - 6, Math.round(rad * 1.2), 12);
-
-    for (let i = 0; i < 4; i++) {
-      drawStepLightning(
-        ctx,
-        sx + dir * 50,
-        FLOOR_Y - 190,
-        tx,
-        FLOOR_Y - 220 + i * 44,
-        '#e0f2fe',
-        '#38bdf8',
-        6,
-        Math.floor(specialFx.timer / 2) + i * 3
-      );
+    for (let s = 0; s < 5; s++) {
+      const smokeP = (s / 5 + p * 2.4) % 1;
+      const smX = Math.round(launchX + (fistX - launchX) * smokeP);
+      const smY = fy + Math.round(Math.sin(s * 2.2 + specialFx.timer * 0.3) * 14);
+      ctx.fillStyle = 'rgba(226, 232, 240, 0.55)';
+      ctx.fillRect(smX - 10, smY - 10, 20, 20);
     }
+
+    // Flamme de tuyère arrière du poing-fusée
+    const flameLen = 42 + ((specialFx.timer * 9) % 24);
+    ctx.fillStyle = '#f97316';
+    ctx.fillRect(fistX - dir * 64 - (dir === 1 ? flameLen : 0), fy - 18, flameLen, 36);
+    ctx.fillStyle = '#fef08a';
+    ctx.fillRect(fistX - dir * 56 - (dir === 1 ? Math.round(flameLen * 0.65) : 0), fy - 9, Math.round(flameLen * 0.65), 18);
+
+    // Véritable sprite avant-bras rouge détaché de Goldohrack !
+    const fistImg = ASSETS.extras && ASSETS.extras.goldohrackFist;
+    if (fistImg && fistImg.complete && fistImg.naturalWidth > 0) {
+      ctx.save();
+      ctx.translate(fistX, fy);
+      ctx.scale(dir, 1);
+      const fw = Math.round(fistImg.width * 1.15);
+      const fh = Math.round(fistImg.height * 1.15);
+      ctx.drawImage(fistImg, -Math.round(fw * 0.5), -Math.round(fh * 0.5), fw, fh);
+      ctx.restore();
+    } else {
+      ctx.fillStyle = '#dc2626';
+      ctx.fillRect(fistX - 36, fy - 24, 72, 48);
+    }
+
+    // Éclat d'impact à l'arrivée sur l'adversaire
+    if (p >= 0.48 && p <= 0.78) {
+      const boomR = Math.round(32 + Math.sin(((p - 0.48) / 0.30) * Math.PI) * 58);
+      ctx.fillStyle = 'rgba(250, 204, 21, 0.45)';
+      ctx.fillRect(targetX - boomR, fy - boomR, boomR * 2, boomR * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(targetX - Math.round(boomR * 0.4), fy - Math.round(boomR * 0.4), Math.round(boomR * 0.8), Math.round(boomR * 0.8));
+    }
+  } else if (attacker.id === 'koll') {
+    // KOLL — Déguisement Lapin-Aimant Tesla : oreilles de lapin + ondes roses d'attraction + décharge atomique !
+    const dirAttr = -dir; // onde magnétique tirant l'adversaire VERS Koll !
+    const wavePulse = (specialFx.timer * 0.14) % 1;
+
+    // Halo rose/cyan mignon autour de Koll déguisé en lapin
+    ctx.fillStyle = 'rgba(244, 114, 182, 0.22)';
+    ctx.fillRect(sx - 92, FLOOR_Y - 340, 184, 340);
+
+    // Anneaux d'attraction magnétique + cœurs & carottes aspirés vers Koll
+    for (let ring = 0; ring < 4; ring++) {
+      const rp = (ring * 0.25 + (1 - wavePulse)) % 1;
+      const rx = Math.round(sx + (tx - sx) * rp);
+      const ry = FLOOR_Y - 175 + Math.round(Math.sin(ring * 1.7 + specialFx.timer * 0.2) * 32);
+      ctx.strokeStyle = ring % 2 === 0 ? '#f472b6' : '#38bdf8';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(rx, ry, 28 + ring * 8, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.lineWidth = 1;
+
+      // Petit cœur d'attraction pixelisé
+      ctx.fillStyle = '#fb7185';
+      ctx.fillRect(rx - 8, ry - 4, 7, 7);
+      ctx.fillRect(rx + 1, ry - 4, 7, 7);
+      ctx.fillRect(rx - 6, ry + 2, 12, 7);
+      ctx.fillRect(rx - 3, ry + 8, 6, 4);
+    }
+
+    // Nuage carotte & aura lapin quand l'ennemi est attiré près de Koll
+    if (specialFx.timer >= 20) {
+      const rad = Math.round(48 + Math.max(0, p - 0.35) * 420);
+      ctx.fillStyle = 'rgba(34, 197, 94, 0.26)';
+      ctx.fillRect(sx - rad, FLOOR_Y - 180 - Math.round(rad * 0.45), rad * 2, Math.round(rad * 0.9));
+      ctx.fillStyle = '#4ade80';
+      ctx.fillRect(sx - rad, FLOOR_Y - 180 - 12, rad * 2, 24);
+      ctx.fillStyle = '#dcfce7';
+      ctx.fillRect(sx - Math.round(rad * 0.6), FLOOR_Y - 180 - 6, Math.round(rad * 1.2), 12);
+
+      for (let i = 0; i < 4; i++) {
+        drawStepLightning(
+          ctx,
+          sx + dir * 40,
+          FLOOR_Y - 190,
+          tx,
+          FLOOR_Y - 220 + i * 44,
+          '#e0f2fe',
+          '#38bdf8',
+          6,
+          Math.floor(specialFx.timer / 2) + i * 3
+        );
+      }
+    }
+    void dirAttr;
   } else {
     // LURCK — Éclipse Nocturne + yeux dorés géants + 3 grandes lames de serres dorées
     ctx.fillStyle = 'rgba(2, 6, 23, 0.72)';
@@ -466,8 +664,11 @@ export function drawSpecialFX(ctx, specialFx, fighters) {
   ctx.lineWidth = 1;
   ctx.font = 'bold 21px monospace';
   ctx.textAlign = 'center';
-  const bannerIcon = attacker.id === 'darkmada' ? '💖' : '⚡';
-  pxText(ctx, `${bannerIcon} ${def.name.toUpperCase()} : ${def.specialName.toUpperCase()} !`, STAGE_W / 2, 163, '#ffffff', '#000000', 2);
+  const bannerIcon = attacker.id === 'darkmada' ? '🐕'
+    : attacker.id === 'koll' ? '🐰'
+    : attacker.id === 'goldohrack' ? '🚀'
+    : '⚡';
+  pxText(ctx, `${bannerIcon} ${(def.hudName || def.name).toUpperCase()} : ${def.specialName.toUpperCase()} !`, STAGE_W / 2, 163, '#ffffff', '#000000', 2);
   ctx.textAlign = 'left';
   ctx.restore();
 }
@@ -1084,6 +1285,12 @@ export function drawFranceMapScreen(ctx, state) {
     ctx.font = isStart || isDest ? 'bold 16px monospace' : 'bold 13px monospace';
     const col = isDest ? '#fde047' : isStart ? '#38bdf8' : '#e2e8f0';
     pxText(ctx, f.city, x + off.dx, y + off.dy, col, '#000000', 2);
+
+    // Scintillement animé sur les décors emblématiques de chaque ville
+    if ((state.tick + x) % 48 < 18) {
+      ctx.fillStyle = isDest ? '#fde047' : 'rgba(255, 255, 255, 0.72)';
+      ctx.fillRect(x - 14 + ((state.tick >> 2) % 24), y - 22, 3, 3);
+    }
   });
 
   // Bandeau inférieur (style capture 3)
@@ -1219,6 +1426,42 @@ export function drawVsScreen(ctx, state) {
   ctx.font = 'bold 18px monospace';
   pxText(ctx, `${arena.name.toUpperCase()} · ${f2.city}`, STAGE_W / 2, STAGE_H - 41, '#ffffff', '#000000', 2);
 
+  ctx.textAlign = 'left';
+  ctx.restore();
+}
+
+/**
+ * 5) BANDEAU MODE VEILLE / ÉCRAN DE VEILLE (ATTRACT MODE)
+ */
+export function drawAttractOverlay(ctx, state) {
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+
+  const blink = Math.floor(state.tick / 22) % 2 === 0;
+  const topMode = state.screen === 'map' || state.screen === 'vs';
+  const boxW = 810;
+  const boxH = 38;
+  const boxX = Math.round(STAGE_W / 2 - boxW / 2);
+  const boxY = topMode ? 52 : STAGE_H - 52;
+
+  ctx.fillStyle = 'rgba(9, 9, 11, 0.86)';
+  ctx.fillRect(boxX, boxY, boxW, boxH);
+  ctx.strokeStyle = blink ? '#facc15' : '#38bdf8';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(boxX, boxY, boxW, boxH);
+  ctx.lineWidth = 1;
+
+  ctx.textAlign = 'center';
+  ctx.font = 'bold 17px monospace';
+  pxText(
+    ctx,
+    '🎬 DÉMO VEILLE EN DIRECT · APPUYEZ SUR UNE TOUCHE OU CLIQUEZ POUR JOUER',
+    STAGE_W / 2,
+    boxY + 25,
+    blink ? '#fef08a' : '#e2e8f0',
+    '#000000',
+    2
+  );
   ctx.textAlign = 'left';
   ctx.restore();
 }

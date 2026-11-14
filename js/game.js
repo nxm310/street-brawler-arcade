@@ -13,7 +13,8 @@ import {
   drawTitleScreen,
   drawSelectScreen,
   drawFranceMapScreen,
-  drawVsScreen
+  drawVsScreen,
+  drawAttractOverlay
 } from './renderer.js';
 
 const canvas = document.getElementById('gameCanvas');
@@ -28,6 +29,7 @@ const modeBotHeaderBtn = document.getElementById('modeBotHeaderBtn');
 const modeLocalHeaderBtn = document.getElementById('modeLocalHeaderBtn');
 const botDiffSelect = document.getElementById('botDiffSelect');
 const openSelectHeaderBtn = document.getElementById('openSelectHeaderBtn');
+const attractToggleBtn = document.getElementById('attractToggleBtn');
 const audioToggleBtn = document.getElementById('audioToggleBtn');
 const fullscreenBtn = document.getElementById('fullscreenBtn');
 
@@ -48,6 +50,8 @@ const game = {
   screen: 'menu', // 'menu' | 'select' | 'map' | 'vs' | 'intro' | 'fight' | 'roundOver' | 'matchOver'
   mode: 'bot', // 'bot' | 'local'
   botDiff: 'normal', // 'easy' | 'normal' | 'hard'
+  isAttract: false,
+  idleFrames: 0,
   arena: 'cod',
   p1Choice: 'goldohrack',
   p2Choice: 'darkmada',
@@ -81,8 +85,10 @@ function createFighter(id, x, facing) {
     trailHp: 100,
     superMeter: 0, // Démarre à 0% et se recharge avec les coups portés !
     rounds: 0,
-    state: 'idle', // 'idle' | 'walk' | 'jump' | 'crouch' | 'block' | 'light' | 'heavy' | 'special' | 'hit' | 'ko'
+    state: 'idle', // 'idle' | 'walk' | 'jump' | 'crouch' | 'block' | 'parry' | 'light' | 'heavy' | 'kick' | 'sweep' | 'jump_punch' | 'jump_kick' | 'special' | 'hit' | 'down' | 'ko'
     stateTimer: 0,
+    parryWindow: 0,
+    parryCooldown: 0,
     attackDidHit: false,
     comboCount: 0,
     comboTimer: 0,
@@ -126,9 +132,9 @@ function setScreen(nextScreen) {
   } else if (nextScreen === 'select') {
     sound.setMusicMode('select');
   } else if (nextScreen === 'map' || nextScreen === 'vs') {
-    sound.setMusicMode('none');
+    sound.setMusicMode(game.isAttract ? 'attract' : 'none');
   } else if (nextScreen === 'intro' || nextScreen === 'fight') {
-    sound.setMusicMode('fight');
+    sound.setMusicMode(game.isAttract ? 'attract' : 'fight');
   } else if (nextScreen === 'matchOver') {
     sound.setMusicMode('victory');
   }
@@ -136,7 +142,35 @@ function setScreen(nextScreen) {
   updateHeaderAndBars();
 }
 
+function startAttractCycle() {
+  game.isAttract = true;
+  game.idleFrames = 0;
+  game.specialFx = null;
+  const f1 = FIGHTER_ORDER[Math.floor(Math.random() * FIGHTER_ORDER.length)];
+  const others = FIGHTER_ORDER.filter(id => id !== f1);
+  const f2 = others[Math.floor(Math.random() * others.length)];
+  game.p1Choice = f1;
+  game.p2Choice = f2;
+  game.arena = ARENA_ORDER[Math.floor(Math.random() * ARENA_ORDER.length)];
+  game.roundNumber = 1;
+  resetRoundFighters(false);
+  game.fighters[0].superMeter = 65;
+  game.fighters[1].superMeter = 65;
+  game.phaseDuration = 140;
+  game.phaseTimer = 140;
+  setScreen('map');
+}
+
+function stopAttractToMenu() {
+  game.isAttract = false;
+  game.idleFrames = 0;
+  game.specialFx = null;
+  setScreen('menu');
+}
+
 function startTourAndFight() {
+  game.isAttract = false;
+  game.idleFrames = 0;
   if (document.activeElement instanceof HTMLElement && document.activeElement !== canvas) {
     document.activeElement.blur();
   }
@@ -204,18 +238,24 @@ function addFloatingText(x, y, text, color = '#fde047', size = 24) {
 }
 
 function updateHeaderAndBars() {
-  modeBotHeaderBtn.classList.toggle('is-active', game.mode === 'bot');
-  modeLocalHeaderBtn.classList.toggle('is-active', game.mode === 'local');
+  modeBotHeaderBtn.classList.toggle('is-active', game.mode === 'bot' && !game.isAttract);
+  modeLocalHeaderBtn.classList.toggle('is-active', game.mode === 'local' && !game.isAttract);
+  if (attractToggleBtn) {
+    attractToggleBtn.classList.toggle('is-active', game.isAttract);
+    attractToggleBtn.textContent = game.isAttract ? '⏹ Quitter Veille' : '🎬 Mode Veille';
+  }
   botDiffSelect.disabled = game.mode !== 'bot';
   controlsP2Text.textContent =
-    game.mode === 'bot'
-      ? 'BOT IA : contrôle automatique (difficulté réglable en haut)'
-      : 'J2 Local : ←/→ bouger · ↑ sauter · ↓ garde · K/L frapper · Maj Droite ou O Spécial';
+    game.isAttract
+      ? 'MODE VEILLE : Simulation automatique IA vs IA (appuyez sur une touche pour jouer)'
+      : game.mode === 'bot'
+        ? 'BOT IA : contrôle automatique (difficulté réglable en haut)'
+        : 'J2 Local : ←/→ bouger · ↑ sauter · ↓ baisser · K Poing · L Pied (↓+L Balayette) · M Parade · O Spécial';
 
   const inFight = game.screen === 'fight';
-  triggerSpecialP1Btn.disabled = !inFight;
-  triggerSpecialP2Btn.disabled = !inFight || game.mode === 'bot';
-  refillSuperBtn.disabled = !(game.screen === 'fight' || game.screen === 'intro');
+  triggerSpecialP1Btn.disabled = !inFight || game.isAttract;
+  triggerSpecialP2Btn.disabled = !inFight || game.mode === 'bot' || game.isAttract;
+  refillSuperBtn.disabled = !(game.screen === 'fight' || game.screen === 'intro') || game.isAttract;
 
   const arenaButtons = quickArenaBar.querySelectorAll('button[data-arena]');
   arenaButtons.forEach(btn => {
@@ -244,29 +284,33 @@ function buildQuickArenaBar() {
 }
 
 // --- LOGIQUE DE COMBAT & COUPS SPÉCIAUX ---
+const BUSY_STATES = new Set([
+  'hit', 'ko', 'down', 'light', 'heavy', 'kick', 'sweep', 'jump_punch', 'jump_kick', 'parry', 'special'
+]);
+
 function triggerAttack(attackerIdx, type) {
   const f = game.fighters[attackerIdx];
   if (!f || game.screen !== 'fight') return;
-  if (f.state === 'hit' || f.state === 'ko' || f.state === 'light' || f.state === 'heavy' || f.state === 'special') {
+  if (BUSY_STATES.has(f.state)) {
     return;
   }
 
   if (type === 'special') {
     if (f.superMeter < 100 || game.specialFx) {
-      if (f.superMeter < 100) {
+      if (f.superMeter < 100 && !game.isAttract) {
         addFloatingText(f.x, f.y - 230, `SPÉCIAL ${Math.round(f.superMeter)}%`, '#38bdf8', 18);
       }
       return;
     }
     f.superMeter = 0;
     f.state = 'special';
-    f.stateTimer = 55;
+    f.stateTimer = 80;
     f.attackDidHit = false;
     f.vx = 0;
     game.specialFx = {
       attackerIdx,
       timer: 0,
-      duration: 78,
+      duration: 80,
       hitApplied: false
     };
     game.shake = 10;
@@ -275,8 +319,47 @@ function triggerAttack(attackerIdx, type) {
     return;
   }
 
+  if (type === 'parry') {
+    if (f.y < FLOOR_Y || f.parryCooldown > 0) return;
+    f.state = 'parry';
+    f.stateTimer = 16;
+    f.parryWindow = 10;
+    f.parryCooldown = 28;
+    f.vx = 0;
+    sound.playParry();
+    return;
+  }
+
+  if (type === 'kick') {
+    f.attackDidHit = false;
+    if (f.y < FLOOR_Y - 2) {
+      f.state = 'jump_kick';
+      f.stateTimer = 20;
+      sound.playKick();
+    } else if (f.state === 'crouch') {
+      f.state = 'sweep';
+      f.stateTimer = 24;
+      f.vx = f.facing * 5.2;
+      sound.playSweep();
+    } else {
+      f.state = 'kick';
+      f.stateTimer = 22;
+      f.vx = f.facing * 4.2;
+      sound.playKick();
+    }
+    return;
+  }
+
+  if (f.y < FLOOR_Y - 2) {
+    f.state = 'jump_punch';
+    f.stateTimer = 18;
+    f.attackDidHit = false;
+    sound.playPunch(type === 'heavy');
+    return;
+  }
+
   f.state = type;
-  f.stateTimer = type === 'light' ? 18 : 28;
+  f.stateTimer = type === 'light' ? 18 : 26;
   f.attackDidHit = false;
   if (f.y >= FLOOR_Y) {
     f.vx = f.facing * (type === 'light' ? 3.2 : 4.8);
@@ -290,7 +373,17 @@ function applyHit(attackerIdx, dmg, knockback, isSpecial = false, attackKind = '
   const defender = game.fighters[1 - attackerIdx];
   if (defender.state === 'ko') return;
 
-  const isBlocking = defender.state === 'block';
+  // Parade Parfaite (Perfect Parry SF3) : 0 dégât + contre-charge Super !
+  if (defender.state === 'parry' && defender.parryWindow > 0 && !isSpecial) {
+    defender.superMeter = Math.min(100, defender.superMeter + 22);
+    attacker.vx = -attacker.facing * 7.5;
+    sound.playPerfectParry();
+    spawnParticles(defender.x, defender.y - 115, '#fde047', 22, 7);
+    addFloatingText(defender.x, defender.y - 190, '⚡ PARADE PARFAITE ! +22%', '#fde047', 23);
+    return;
+  }
+
+  const isBlocking = defender.state === 'block' || defender.state === 'parry';
   const finalDmg = isBlocking ? Math.max(2, Math.round(dmg * 0.25)) : dmg;
 
   defender.hp = Math.max(0, defender.hp - finalDmg);
@@ -303,7 +396,9 @@ function applyHit(attackerIdx, dmg, knockback, isSpecial = false, attackKind = '
       ? 8
       : attackKind === 'heavy'
         ? 26
-        : 18;
+        : attackKind === 'kick' || attackKind === 'sweep'
+          ? 22
+          : 18;
   attacker.superMeter = Math.min(100, attacker.superMeter + meterGain);
   defender.superMeter = Math.min(100, defender.superMeter + 6);
 
@@ -312,22 +407,35 @@ function applyHit(attackerIdx, dmg, knockback, isSpecial = false, attackKind = '
     spawnParticles(defender.x, defender.y - 95, '#38bdf8', 14, 5);
     addFloatingText(defender.x, defender.y - 175, `GARDE -${finalDmg}%`, '#38bdf8', 22);
   } else {
-    defender.state = 'hit';
-    defender.stateTimer = isSpecial ? 26 : 14;
+    if (attackKind === 'sweep') {
+      defender.state = 'down';
+      defender.stateTimer = 28;
+      defender.vy = -5;
+    } else {
+      defender.state = 'hit';
+      defender.stateTimer = isSpecial ? 26 : 14;
+    }
     defender.comboCount++;
     defender.comboTimer = 85;
     game.shake = isSpecial ? 16 : 8;
     const hitCol = attacker.id === 'darkmada' && isSpecial ? '#f472b6' : attacker.def.color;
     spawnParticles(defender.x, defender.y - 110, hitCol, isSpecial ? 36 : 16, isSpecial ? 10 : 6);
+
+    let floatLabel = `-${finalDmg}%`;
+    if (attackKind === 'sweep') {
+      floatLabel = `BALAYETTE ! -${finalDmg}%`;
+    } else if (isSpecial) {
+      if (attacker.id === 'darkmada') floatLabel = `SUSHI ♥ -${finalDmg}%`;
+      else if (attacker.id === 'koll') floatLabel = `LAPIN-AIMANT 🐰 -${finalDmg}%`;
+      else if (attacker.id === 'goldohrack') floatLabel = `FULGURO-POING 🚀 -${finalDmg}%`;
+      else floatLabel = `SUPER -${finalDmg}%!`;
+    }
+
     addFloatingText(
       defender.x,
       defender.y - 185,
-      isSpecial
-        ? attacker.id === 'darkmada'
-          ? `BISOUS ♥ -${finalDmg}%`
-          : `SUPER -${finalDmg}%!`
-        : `-${finalDmg}%`,
-      isSpecial ? '#fde047' : '#ffffff',
+      floatLabel,
+      isSpecial ? '#fde047' : attackKind === 'sweep' ? '#38bdf8' : '#ffffff',
       isSpecial ? 30 : 24
     );
   }
@@ -384,7 +492,7 @@ function readPlayerInput(idx) {
 function updateHumanFighter(idx) {
   const f = game.fighters[idx];
   const opp = game.fighters[1 - idx];
-  if (f.state === 'hit' || f.state === 'ko' || f.state === 'light' || f.state === 'heavy' || f.state === 'special') {
+  if (BUSY_STATES.has(f.state)) {
     return;
   }
 
@@ -396,11 +504,17 @@ function updateHumanFighter(idx) {
   }
 
   const holdingBack = (f.facing === 1 && input.left) || (f.facing === -1 && input.right);
-  const oppAttacking = opp.state === 'light' || opp.state === 'heavy' || opp.state === 'special';
+  const oppAttacking =
+    opp.state === 'light' || opp.state === 'heavy' || opp.state === 'kick' || opp.state === 'sweep' ||
+    opp.state === 'jump_punch' || opp.state === 'jump_kick' || opp.state === 'special';
 
   if (onGround && (input.down || (holdingBack && oppAttacking))) {
     f.vx = 0;
-    f.state = oppAttacking ? 'block' : 'crouch';
+    const nextState = holdingBack && oppAttacking ? 'block' : 'crouch';
+    if (nextState === 'crouch' && f.state !== 'crouch') {
+      sound.playCrouch();
+    }
+    f.state = nextState;
     return;
   }
 
@@ -424,7 +538,7 @@ function updateHumanFighter(idx) {
   }
 }
 
-// --- IA DU BOT RÉALISTE (1J vs BOT) ---
+// --- IA DU BOT RÉALISTE (1J vs BOT & MODE VEILLE IA vs IA) ---
 function pickBotTactic(bot, dist) {
   const r = Math.random();
   if (dist > 420) {
@@ -444,30 +558,43 @@ function pickBotTactic(bot, dist) {
   return { tactic: 'footsies', dur: 24 + Math.floor(Math.random() * 16) };
 }
 
-function updateBotFighter() {
-  const bot = game.fighters[1];
-  const player = game.fighters[0];
-  if (bot.state === 'hit' || bot.state === 'ko' || bot.state === 'light' || bot.state === 'heavy' || bot.state === 'special') {
+function updateBotFighter(botIdx = 1) {
+  const bot = game.fighters[botIdx];
+  const opp = game.fighters[1 - botIdx];
+  if (BUSY_STATES.has(bot.state)) {
     return;
   }
 
   const onGround = bot.y >= FLOOR_Y;
-  const dirToPlayer = bot.x <= player.x ? 1 : -1;
-  if (onGround) bot.facing = dirToPlayer;
+  const dirToOpp = bot.x <= opp.x ? 1 : -1;
+  if (onGround) bot.facing = dirToOpp;
 
   if (bot.botAttackCooldown > 0) bot.botAttackCooldown--;
   if (bot.botSpecialCooldown > 0) bot.botSpecialCooldown--;
   if (bot.botTacticTimer > 0) bot.botTacticTimer--;
 
-  const dist = Math.abs(bot.x - player.x);
-  const playerAttacking = player.state === 'light' || player.state === 'heavy' || player.state === 'special';
+  const dist = Math.abs(bot.x - opp.x);
+  const oppAttacking =
+    opp.state === 'light' || opp.state === 'heavy' || opp.state === 'kick' || opp.state === 'sweep' || opp.state === 'special';
 
-  const diff = game.botDiff;
+  const diff = game.isAttract ? 'normal' : game.botDiff;
   const blockChance = diff === 'easy' ? 0.22 : diff === 'normal' ? 0.42 : 0.62;
-  const atkRecovery = diff === 'easy' ? 82 : diff === 'normal' ? 56 : 38;
-  const specialRate = diff === 'easy' ? 0.008 : diff === 'normal' ? 0.022 : 0.04;
+  const parryChance = diff === 'easy' ? 0.10 : diff === 'normal' ? 0.25 : 0.42;
+  const atkRecovery = diff === 'easy' ? 82 : diff === 'normal' ? 52 : 36;
+  const specialRate = game.isAttract ? 0.045 : diff === 'easy' ? 0.008 : diff === 'normal' ? 0.022 : 0.04;
 
-  if (onGround && playerAttacking && dist < 245 && bot.botTactic !== 'defend') {
+  // Attaque aérienne si le bot est déjà en l'air proche de l'adversaire
+  if (!onGround && dist < 240 && bot.botAttackCooldown <= 0 && bot.vy > -4) {
+    bot.botAttackCooldown = atkRecovery;
+    triggerAttack(botIdx, Math.random() < 0.6 ? 'kick' : 'light');
+    return;
+  }
+
+  if (onGround && oppAttacking && dist < 245 && bot.botTactic !== 'defend') {
+    if (bot.parryCooldown <= 0 && Math.random() < parryChance) {
+      triggerAttack(botIdx, 'parry');
+      return;
+    }
     if (Math.random() < blockChance) {
       bot.botTactic = 'defend';
       bot.botTacticTimer = 18;
@@ -485,9 +612,9 @@ function updateBotFighter() {
   }
 
   if (bot.superMeter >= 100 && !game.specialFx && bot.botSpecialCooldown <= 0 && dist < 780 && Math.random() < specialRate) {
-    bot.botSpecialCooldown = 240;
+    bot.botSpecialCooldown = 220;
     bot.botAttackCooldown = atkRecovery + 20;
-    triggerAttack(1, 'special');
+    triggerAttack(botIdx, 'special');
     return;
   }
 
@@ -496,9 +623,9 @@ function updateBotFighter() {
     bot.botTactic = picked.tactic;
     bot.botTacticTimer = picked.dur;
     if (bot.botTactic === 'footsies') {
-      if (dist > 320) bot.botMoveDir = dirToPlayer;
-      else if (dist < 220) bot.botMoveDir = -dirToPlayer;
-      else bot.botMoveDir = Math.random() < 0.5 ? dirToPlayer : -dirToPlayer;
+      if (dist > 320) bot.botMoveDir = dirToOpp;
+      else if (dist < 220) bot.botMoveDir = -dirToOpp;
+      else bot.botMoveDir = Math.random() < 0.5 ? dirToOpp : -dirToOpp;
     }
   }
 
@@ -506,23 +633,33 @@ function updateBotFighter() {
   if (bot.botTactic === 'observe') {
     bot.vx = 0;
   } else if (bot.botTactic === 'retreat') {
-    bot.vx = -dirToPlayer * bot.def.speed * 0.72 * speedScale;
+    bot.vx = -dirToOpp * bot.def.speed * 0.72 * speedScale;
   } else if (bot.botTactic === 'footsies') {
     bot.vx = bot.botMoveDir * bot.def.speed * 0.58 * speedScale;
   } else if (bot.botTactic === 'approach') {
-    bot.vx = dist > 180 ? dirToPlayer * bot.def.speed * 0.85 * speedScale : 0;
-    if (onGround && dist > 250 && dist < 400 && Math.random() < 0.015) {
+    bot.vx = dist > 180 ? dirToOpp * bot.def.speed * 0.85 * speedScale : 0;
+    if (onGround && dist > 235 && dist < 410 && Math.random() < 0.02) {
       bot.vy = bot.def.jumpForce;
       bot.y -= 2;
       bot.state = 'jump';
     }
   }
 
-  if (dist < 225 && bot.botAttackCooldown <= 0 && (bot.botTactic === 'approach' || (bot.botTactic === 'footsies' && Math.random() < 0.06))) {
+  if (onGround && dist < 235 && bot.botAttackCooldown <= 0 && (bot.botTactic === 'approach' || (bot.botTactic === 'footsies' && Math.random() < 0.08))) {
     bot.botAttackCooldown = atkRecovery;
     bot.botTactic = Math.random() < 0.55 ? 'retreat' : 'observe';
-    bot.botTacticTimer = 28 + Math.floor(Math.random() * 24);
-    triggerAttack(1, Math.random() < 0.65 ? 'light' : 'heavy');
+    bot.botTacticTimer = 26 + Math.floor(Math.random() * 22);
+    const rAtk = Math.random();
+    if (rAtk < 0.24) {
+      bot.state = 'crouch';
+      triggerAttack(botIdx, 'kick'); // Balayette !
+    } else if (rAtk < 0.56) {
+      triggerAttack(botIdx, 'kick');
+    } else if (rAtk < 0.82) {
+      triggerAttack(botIdx, 'light');
+    } else {
+      triggerAttack(botIdx, 'heavy');
+    }
     return;
   }
 
@@ -541,6 +678,15 @@ function stepPhysics() {
   }
 
   if (game.announcementTimer > 0) game.announcementTimer--;
+
+  // Écran de veille automatique (Attract Mode) après 10s d'inactivité sur le menu titre
+  if (game.screen === 'menu' && !game.isAttract) {
+    game.idleFrames++;
+    if (game.idleFrames >= 600) {
+      startAttractCycle();
+      return;
+    }
+  }
 
   // Animations des écrans Carte de France -> Écran VS -> Intro Combat
   if (game.screen === 'map') {
@@ -602,6 +748,10 @@ function stepPhysics() {
     });
 
     if (game.phaseTimer <= 0) {
+      if (game.isAttract) {
+        startAttractCycle();
+        return;
+      }
       const [p1, p2] = game.fighters;
       if (p1.rounds >= 2 || p2.rounds >= 2 || game.roundNumber >= 3) {
         showMatchOver();
@@ -623,14 +773,25 @@ function stepPhysics() {
     return;
   }
 
-  // Effet spécial en cours
+  // Effet spécial en cours (dont attraction physique du Lapin-Aimant de Koll)
   if (game.specialFx) {
     const sp = game.specialFx;
     sp.timer++;
+    const attacker = game.fighters[sp.attackerIdx];
+    const defender = game.fighters[1 - sp.attackerIdx];
+
+    // KOLL — Le déguisement lapin attire irrésistiblement l'adversaire vers lui avant la décharge !
+    if (attacker && defender && attacker.id === 'koll' && sp.timer >= 5 && sp.timer <= 29) {
+      const targetX = Math.max(135, Math.min(STAGE_W - 135, attacker.x + attacker.facing * 125));
+      const dx = targetX - defender.x;
+      defender.x += Math.sign(dx) * Math.min(6.5, Math.abs(dx));
+      if (sp.timer % 3 === 0) {
+        spawnParticles(defender.x, defender.y - 130, sp.timer % 6 === 0 ? '#f472b6' : '#38bdf8', 4, 4);
+      }
+    }
+
     if (sp.timer === 30 && !sp.hitApplied) {
       sp.hitApplied = true;
-      const attacker = game.fighters[sp.attackerIdx];
-      const defender = game.fighters[1 - sp.attackerIdx];
       if (Math.abs(attacker.x - defender.x) < 1100) {
         applyHit(sp.attackerIdx, attacker.def.specialDmg, 14, true, 'special');
       }
@@ -642,9 +803,14 @@ function stepPhysics() {
 
   const freezeActive = game.specialFx && game.specialFx.timer < 18;
   if (!freezeActive) {
-    updateHumanFighter(0);
-    if (game.mode === 'local') updateHumanFighter(1);
-    else updateBotFighter();
+    if (game.isAttract) {
+      updateBotFighter(0);
+      updateBotFighter(1);
+    } else {
+      updateHumanFighter(0);
+      if (game.mode === 'local') updateHumanFighter(1);
+      else updateBotFighter(1);
+    }
   }
 
   // Physique & Collisions d'attaques avec portée alignée sur les sprites pixel-art
@@ -652,18 +818,35 @@ function stepPhysics() {
     if (f.trailHp > f.hp) f.trailHp = Math.max(f.hp, f.trailHp - 0.55);
     if (f.comboTimer > 0) f.comboTimer--;
     else f.comboCount = 0;
+    if (f.parryWindow > 0) f.parryWindow--;
+    if (f.parryCooldown > 0) f.parryCooldown--;
 
     if (f.stateTimer > 0) {
       f.stateTimer--;
-      if (f.state === 'light' || f.state === 'heavy') {
+      const isMelee =
+        f.state === 'light' || f.state === 'heavy' || f.state === 'kick' || f.state === 'sweep' ||
+        f.state === 'jump_punch' || f.state === 'jump_kick';
+      if (isMelee) {
         const opp = game.fighters[1 - idx];
-        const reach = f.state === 'light' ? 250 : 285;
-        const active = f.state === 'light' ? f.stateTimer >= 5 && f.stateTimer <= 15 : f.stateTimer >= 8 && f.stateTimer <= 22;
+        const reach =
+          f.state === 'heavy' ? 285
+          : f.state === 'kick' || f.state === 'jump_kick' ? 275
+          : f.state === 'sweep' ? 265
+          : 250;
+        const active =
+          f.state === 'heavy' || f.state === 'sweep' ? f.stateTimer >= 6 && f.stateTimer <= 20
+          : f.state === 'kick' || f.state === 'jump_kick' ? f.stateTimer >= 5 && f.stateTimer <= 18
+          : f.stateTimer >= 5 && f.stateTimer <= 15;
         const facingTarget = (f.facing === 1 && opp.x >= f.x - 45) || (f.facing === -1 && opp.x <= f.x + 45);
-        if (active && !f.attackDidHit && facingTarget && Math.abs(f.x - opp.x) <= reach && Math.abs(f.y - opp.y) <= 185) {
+        if (active && !f.attackDidHit && facingTarget && Math.abs(f.x - opp.x) <= reach && Math.abs(f.y - opp.y) <= 195) {
           f.attackDidHit = true;
-          const dmg = f.state === 'light' ? f.def.lightDmg : f.def.heavyDmg;
-          applyHit(idx, dmg, f.state === 'light' ? 7 : 12, false, f.state);
+          const dmg =
+            f.state === 'heavy' ? f.def.heavyDmg
+            : f.state === 'sweep' ? (f.def.sweepDmg || f.def.kickDmg || f.def.heavyDmg)
+            : f.state === 'kick' || f.state === 'jump_kick' ? (f.def.kickDmg || 13)
+            : f.def.lightDmg;
+          const kb = f.state === 'heavy' || f.state === 'sweep' ? 12 : f.state === 'kick' ? 10 : 7;
+          applyHit(idx, dmg, kb, false, f.state);
         }
       }
       if (f.stateTimer === 0 && f.state !== 'ko') {
@@ -725,6 +908,10 @@ function render() {
     }
   }
 
+  if (game.isAttract) {
+    drawAttractOverlay(ctx, game);
+  }
+
   ctx.restore();
 }
 
@@ -752,6 +939,7 @@ canvas.addEventListener('contextmenu', e => {
 });
 
 canvas.addEventListener('mousedown', e => {
+  game.idleFrames = 0;
   sound.unlock();
   if (!sound.muted && sound.musicMode !== 'none') {
     // Relance le séquenceur dès la première interaction utilisateur
@@ -760,6 +948,11 @@ canvas.addEventListener('mousedown', e => {
     sound.setMusicMode(mode);
   }
   canvas.focus();
+
+  if (game.isAttract) {
+    stopAttractToMenu();
+    return;
+  }
 
   const { x, y } = getCanvasCoords(e);
 
@@ -845,6 +1038,7 @@ function stepFighterChoice(playerIdx, dir) {
 }
 
 window.addEventListener('keydown', e => {
+  game.idleFrames = 0;
   sound.unlock();
 
   const activeTag = document.activeElement?.tagName;
@@ -855,10 +1049,23 @@ window.addEventListener('keydown', e => {
   }
 
   if (e.repeat) return;
+
+  if (game.isAttract) {
+    e.preventDefault();
+    stopAttractToMenu();
+    return;
+  }
+
   keys.add(e.code);
 
   // Navigation Écran Titre
   if (game.screen === 'menu') {
+    if (!isFormFocus && e.code === 'KeyV') {
+      e.preventDefault();
+      sound.playConfirm();
+      startAttractCycle();
+      return;
+    }
     if (!isFormFocus && (e.code === 'Enter' || e.code === 'NumpadEnter' || e.code === 'Space' || e.code === 'KeyF')) {
       e.preventDefault();
       sound.playConfirm();
@@ -869,6 +1076,12 @@ window.addEventListener('keydown', e => {
 
   // Navigation Écran Sélection
   if (game.screen === 'select') {
+    if (!isFormFocus && e.code === 'KeyV') {
+      e.preventDefault();
+      sound.playConfirm();
+      startAttractCycle();
+      return;
+    }
     if (e.code === 'Tab') {
       e.preventDefault();
       game.selectTarget = game.selectTarget === 1 ? 2 : 1;
@@ -918,11 +1131,15 @@ window.addEventListener('keydown', e => {
 
   if (game.screen !== 'fight') return;
 
-  // Touches de Combat : Frapper = F (G lourd), Sauter = ESPACE, Coup Spécial = ENTRÉE
+  // Touches de Combat SF2 : Poing (F/R) · Pied/Balayette (G/H) · Parade (C/MajG) · Saut (Espace) · Spécial (Entrée)
   if (e.code === 'KeyF') {
     triggerAttack(0, 'light');
-  } else if (e.code === 'KeyG') {
+  } else if (e.code === 'KeyR') {
     triggerAttack(0, 'heavy');
+  } else if (e.code === 'KeyG' || e.code === 'KeyH') {
+    triggerAttack(0, 'kick');
+  } else if (e.code === 'KeyC' || e.code === 'ShiftLeft') {
+    triggerAttack(0, 'parry');
   } else if (e.code === 'Enter' || (game.mode === 'bot' && e.code === 'NumpadEnter')) {
     e.preventDefault();
     triggerAttack(0, 'special');
@@ -930,7 +1147,8 @@ window.addEventListener('keydown', e => {
 
   if (game.mode === 'local') {
     if (e.code === 'KeyK') triggerAttack(1, 'light');
-    else if (e.code === 'KeyL') triggerAttack(1, 'heavy');
+    else if (e.code === 'KeyL') triggerAttack(1, 'kick');
+    else if (e.code === 'KeyM' || e.code === 'KeyJ') triggerAttack(1, 'parry');
     else if (e.code === 'KeyO' || e.code === 'ShiftRight' || e.code === 'NumpadEnter') {
       e.preventDefault();
       triggerAttack(1, 'special');
@@ -949,6 +1167,8 @@ window.addEventListener('blur', () => {
 // Événements Barre Supérieure & Overlay Fin de Match
 modeBotHeaderBtn.addEventListener('click', () => {
   sound.unlock();
+  game.isAttract = false;
+  game.idleFrames = 0;
   game.mode = 'bot';
   game.selectTarget = 1;
   sound.playMenu();
@@ -958,6 +1178,8 @@ modeBotHeaderBtn.addEventListener('click', () => {
 
 modeLocalHeaderBtn.addEventListener('click', () => {
   sound.unlock();
+  game.isAttract = false;
+  game.idleFrames = 0;
   game.mode = 'local';
   game.selectTarget = 2;
   sound.playMenu();
@@ -966,21 +1188,39 @@ modeLocalHeaderBtn.addEventListener('click', () => {
 });
 
 botDiffSelect.addEventListener('change', e => {
+  game.idleFrames = 0;
   game.botDiff = e.target.value;
   botDiffSelect.blur();
 });
 
 openSelectHeaderBtn.addEventListener('click', () => {
   sound.unlock();
+  game.isAttract = false;
+  game.idleFrames = 0;
   sound.playMenu();
   setScreen('select');
   openSelectHeaderBtn.blur();
 });
 
+if (attractToggleBtn) {
+  attractToggleBtn.addEventListener('click', () => {
+    sound.unlock();
+    if (game.isAttract) {
+      sound.playMenu();
+      stopAttractToMenu();
+    } else {
+      sound.playConfirm();
+      startAttractCycle();
+    }
+    attractToggleBtn.blur();
+  });
+}
+
 audioToggleBtn.addEventListener('click', () => {
   sound.unlock();
+  game.idleFrames = 0;
   const muted = sound.toggleMute();
-  audioToggleBtn.textContent = muted ? 'Musique 8-bit : OFF' : 'Musique 8-bit : ON';
+  audioToggleBtn.textContent = muted ? 'Musique 16-bit : OFF' : 'Musique 16-bit : ON';
   if (!muted) sound.playMenu();
   audioToggleBtn.blur();
 });
