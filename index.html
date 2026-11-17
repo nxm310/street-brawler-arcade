@@ -2,7 +2,10 @@
 <html lang="fr">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Street Brawler Arcade — La Tournée des Légendes (6 Combattants &amp; 6 Arènes)</title>
   <link rel="preload" as="image" href="assets/ui/title_screen.png" />
   <link rel="preload" as="image" href="assets/ui/france_map.png" />
@@ -30,6 +33,7 @@
 
       <button id="openSelectHeaderBtn" type="button" class="btn">Combattants &amp; Carte</button>
       <button id="attractToggleBtn" type="button" class="btn">🎬 Mode Veille</button>
+      <button id="touchToggleBtn" type="button" class="btn" aria-label="Activer ou masquer les commandes tactiles">🕹 Tactile : Auto</button>
       <button id="audioToggleBtn" type="button" class="btn">Musique 16-bit : ON</button>
       <button id="fullscreenBtn" type="button" class="btn">Plein Écran</button>
     </div>
@@ -38,6 +42,47 @@
   <main class="main-wrap">
     <div id="stageContainer" class="stage-container">
       <canvas id="gameCanvas" width="1280" height="720" tabindex="0" aria-label="Arène de combat Street Brawler Arcade"></canvas>
+
+      <!-- Commandes tactiles virtuelles transparentes (iPad / Tablette / Mobile) -->
+      <div id="touchControlsLayer" class="touch-controls" aria-label="Commandes tactiles de combat" hidden>
+        <div id="touchLeftZone" class="touch-left-zone" role="application" aria-label="Joystick virtuel de déplacement">
+          <div id="touchStickBase" class="touch-stick-base">
+            <span class="touch-dir touch-dir-up" aria-hidden="true">▲</span>
+            <span class="touch-dir touch-dir-down" aria-hidden="true">▼</span>
+            <span class="touch-dir touch-dir-left" aria-hidden="true">◀</span>
+            <span class="touch-dir touch-dir-right" aria-hidden="true">▶</span>
+            <div class="touch-stick-ring" aria-hidden="true"></div>
+            <div id="touchStickKnob" class="touch-stick-knob" aria-hidden="true"></div>
+          </div>
+        </div>
+
+        <div id="touchRightZone" class="touch-right-zone" role="group" aria-label="Boutons d'attaques">
+          <button type="button" class="touch-btn touch-btn-boule" data-touch-action="headbutt" aria-label="Coup de boule (brise garde)">
+            <span class="touch-btn-main">BOULE</span>
+          </button>
+          <button type="button" class="touch-btn touch-btn-dragon" data-touch-action="shoryuken" aria-label="Shoryuken (anti-air)">
+            <span class="touch-btn-main">DRAGON</span>
+          </button>
+          <button type="button" class="touch-btn touch-btn-spin" data-touch-action="spinkick" aria-label="Spin Kick (tournoyant)">
+            <span class="touch-btn-main">SPIN</span>
+          </button>
+          <button id="touchBtnSpecial" type="button" class="touch-btn touch-btn-special" data-touch-action="special" aria-label="Coup spécial">
+            <span class="touch-btn-main">⚡</span>
+            <span class="touch-btn-sub">SPÉCIAL</span>
+          </button>
+          <button type="button" class="touch-btn touch-btn-garde" data-touch-action="parry" aria-label="Parade">
+            <span class="touch-btn-main">GARDE</span>
+          </button>
+          <button type="button" class="touch-btn touch-btn-poing" data-touch-action="light" aria-label="Coup de poing">
+            <span class="touch-btn-main">POING</span>
+          </button>
+          <button type="button" class="touch-btn touch-btn-pied" data-touch-action="kick" aria-label="Coup de pied ou balayette">
+            <span class="touch-btn-main">PIED</span>
+          </button>
+        </div>
+      </div>
+
+      <button id="exitPseudoFullscreenBtn" type="button" class="btn touch-exit-fs-btn" hidden aria-label="Quitter le plein écran">✕ Quitter</button>
 
       <!-- Écran Fin de Match -->
       <section id="matchOverOverlay" class="overlay" aria-labelledby="matchWinnerTitle" hidden>
@@ -73,7 +118,7 @@
           <strong>J1 :</strong> Q/A &amp; D bouger · <strong>ESPACE : Sauter</strong> · S baisser · <strong>F : Poing</strong> (S+F bas) · <strong>R : Shoryuken</strong> · <strong>G : Pied</strong> (S+G balayette) · <strong>H : Spin Kick</strong> · <strong>E : Coup de boule</strong> · <strong>C : Parade</strong> · <strong>ENTRÉE : Spécial</strong>
         </div>
         <div id="controlsP2Text">
-          BOT IA : contrôle automatique (difficulté réglable en haut)
+          BOT IA : contrôle automatique (difficulté réglable en haut) · Tactile iPad : stick virtuel à gauche + touches transparentes à droite
         </div>
       </div>
     </section>

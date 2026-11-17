@@ -139,7 +139,21 @@ export class SoundEngine {
   }
 
   unlock() {
-    return this.ensure();
+    const ok = this.ensure();
+    if (ok && this.ctx && this.ctx.state === 'suspended') {
+      try {
+        // Déblocage iOS/iPadOS Safari via tampon silencieux 1 échantillon dans le geste tactile
+        const buf = this.ctx.createBuffer(1, 1, 22050);
+        const src = this.ctx.createBufferSource();
+        src.buffer = buf;
+        src.connect(this.ctx.destination);
+        src.start(0);
+      } catch {
+        // Ignore si déjà actif
+      }
+      this.ctx.resume().catch(() => {});
+    }
+    return ok;
   }
 
   setMusicMode(mode) {

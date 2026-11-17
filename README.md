@@ -59,6 +59,12 @@ Jeu de combat 2D **16-bit Néo-Arcade** jouable directement dans le navigateur (
 | **Coup Spécial** | `Entrée` | `Maj Droite`, `O` ou `Entrée Num.` |
 | **Mode Veille (Attract Mode)** | `V` (sur Menu / Sélection) ou automatique après 10s | — |
 
+### Tactile (iPad / Tablette / Mobile)
+
+- **Stick virtuel flottant translucide** en bas à gauche : suit le pouce pour les 8 directions (`◀ / ▶` déplacement & garde arrière, `▼` accroupi/balayette, `▲` sauts).
+- **Touches transparentes ergonomiques en arc** en bas à droite : `POING`, `PIED` (`▼ + POING/PIED` pour les coups bas), `GARDE` (parade), `BOULE` (coup de boule), `DRAGON` (Shoryuken), `SPIN` (Spin Kick) et `⚡ SPÉCIAL` (jauge circulaire en temps réel).
+- **Activation automatique (`🕹 Tactile : Auto`)** sur iPad/écrans tactiles, activable ou masquable à tout moment depuis la barre supérieure (`ON` / `OFF`). Plein écran compatible iPadOS/Safari.
+
 ---
 
 ## Lancement local

@@ -1062,7 +1062,7 @@ export function drawTitleScreen(ctx, state) {
     pxText(ctx, 'APPUIE SUR START', STAGE_W / 2, 602, '#fde047', '#000000', 3);
   }
   ctx.font = 'bold 15px monospace';
-  pxText(ctx, 'ENTRÉE OU ESPACE · CLIQUEZ POUR CHOISIR VOTRE COMBATTANT', STAGE_W / 2, 636, '#e2e8f0', '#000000', 2);
+  pxText(ctx, 'ENTRÉE · CLIQUEZ OU TOUCHEZ L\'ÉCRAN POUR JOUER', STAGE_W / 2, 636, '#e2e8f0', '#000000', 2);
 
   // Bandeau bas Tournée de France
   ctx.fillStyle = 'rgba(0, 0, 0, 0.90)';

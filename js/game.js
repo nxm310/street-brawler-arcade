@@ -1,5 +1,6 @@
 import { FIGHTER_ORDER, FIGHTERS, ARENA_ORDER, ARENAS } from './data.js';
 import { SoundEngine } from './audio.js';
+import { TouchController } from './touch.js';
 import {
   STAGE_W,
   STAGE_H,
@@ -30,8 +31,17 @@ const modeLocalHeaderBtn = document.getElementById('modeLocalHeaderBtn');
 const botDiffSelect = document.getElementById('botDiffSelect');
 const openSelectHeaderBtn = document.getElementById('openSelectHeaderBtn');
 const attractToggleBtn = document.getElementById('attractToggleBtn');
+const touchToggleBtn = document.getElementById('touchToggleBtn');
 const audioToggleBtn = document.getElementById('audioToggleBtn');
 const fullscreenBtn = document.getElementById('fullscreenBtn');
+const exitPseudoFullscreenBtn = document.getElementById('exitPseudoFullscreenBtn');
+
+const touchControlsLayer = document.getElementById('touchControlsLayer');
+const touchLeftZone = document.getElementById('touchLeftZone');
+const touchStickBase = document.getElementById('touchStickBase');
+const touchStickKnob = document.getElementById('touchStickKnob');
+const touchRightZone = document.getElementById('touchRightZone');
+const touchBtnSpecial = document.getElementById('touchBtnSpecial');
 
 const matchWinnerTitle = document.getElementById('matchWinnerTitle');
 const matchWinnerSubtitle = document.getElementById('matchWinnerSubtitle');
@@ -77,6 +87,21 @@ const game = {
 };
 
 const keys = new Set();
+
+const touchCtrl = new TouchController({
+  stageContainer,
+  layerEl: touchControlsLayer,
+  leftZoneEl: touchLeftZone,
+  stickBaseEl: touchStickBase,
+  stickKnobEl: touchStickKnob,
+  rightZoneEl: touchRightZone,
+  specialBtnEl: touchBtnSpecial,
+  onAction: action => {
+    game.idleFrames = 0;
+    triggerAttack(0, action);
+  },
+  onUnlockAudio: () => sound.unlock()
+});
 
 function createFighter(id, x, facing) {
   const def = FIGHTERS[id];
@@ -257,6 +282,10 @@ function updateHeaderAndBars() {
     attractToggleBtn.classList.toggle('is-active', game.isAttract);
     attractToggleBtn.textContent = game.isAttract ? '⏹ Quitter Veille' : '🎬 Mode Veille';
   }
+  if (touchToggleBtn) {
+    touchToggleBtn.textContent = touchCtrl.getModeLabel();
+    touchToggleBtn.classList.toggle('is-active', touchCtrl.isEnabled());
+  }
   botDiffSelect.disabled = game.mode !== 'bot';
   controlsP2Text.textContent =
     game.isAttract
@@ -398,6 +427,11 @@ function triggerAttack(attackerIdx, type) {
     return;
   }
 
+  const isCrouching =
+    f.state === 'crouch' ||
+    (attackerIdx === 0 && (keys.has('KeyS') || touchCtrl.getMovement().down)) ||
+    (attackerIdx === 1 && keys.has('ArrowDown'));
+
   if (type === 'kick') {
     if (f.y < FLOOR_Y - 2) {
       const sd = sDur(20);
@@ -405,7 +439,7 @@ function triggerAttack(attackerIdx, type) {
       f.stateTimer = sd;
       f.stateDuration = sd;
       sound.playKick();
-    } else if (f.state === 'crouch') {
+    } else if (isCrouching) {
       const sd = sDur(25);
       f.state = 'sweep';
       f.stateTimer = sd;
@@ -432,7 +466,7 @@ function triggerAttack(attackerIdx, type) {
     return;
   }
 
-  if (f.state === 'crouch' && type === 'light') {
+  if (isCrouching && type === 'light') {
     const sd = sDur(16);
     f.state = 'crouch_punch';
     f.stateTimer = sd;
@@ -627,13 +661,14 @@ function showMatchOver() {
   setScreen('matchOver');
 }
 
-// --- CONTRÔLES CLAVIER (SAUTER = ESPACE, FRAPPER = F, SPÉCIAL = ENTRÉE) ---
+// --- CONTRÔLES CLAVIER & TACTILES VIRTUEL (SAUTER = ESPACE / STICK ↑, FRAPPER = F / POING, SPÉCIAL = ENTRÉE / ⚡) ---
 function readPlayerInput(idx) {
   if (idx === 0) {
-    const left = keys.has('KeyA') || keys.has('KeyQ') || (game.mode === 'bot' && keys.has('ArrowLeft'));
-    const right = keys.has('KeyD') || (game.mode === 'bot' && keys.has('ArrowRight'));
-    const up = keys.has('Space') || keys.has('KeyW') || keys.has('KeyZ');
-    const down = keys.has('KeyS');
+    const touch = touchCtrl.getMovement();
+    const left = keys.has('KeyA') || keys.has('KeyQ') || touch.left || (game.mode === 'bot' && keys.has('ArrowLeft'));
+    const right = keys.has('KeyD') || touch.right || (game.mode === 'bot' && keys.has('ArrowRight'));
+    const up = keys.has('Space') || keys.has('KeyW') || keys.has('KeyZ') || touch.up;
+    const down = keys.has('KeyS') || touch.down;
     return { left, right, up, down };
   }
   const left = keys.has('ArrowLeft');
@@ -1168,6 +1203,11 @@ function render() {
     drawAttractOverlay(ctx, game);
   }
 
+  touchCtrl.syncState({
+    visible: (game.screen === 'fight' || game.screen === 'intro') && !game.isAttract,
+    superMeter: game.fighters[0]?.superMeter ?? 0
+  });
+
   ctx.restore();
 }
 
@@ -1200,7 +1240,7 @@ function gameLoop(now = 0) {
   requestAnimationFrame(gameLoop);
 }
 
-// --- INTERACTIONS SOURIS SUR LE CANVAS ---
+// --- INTERACTIONS SOURIS & TACTILES SUR LE CANVAS ---
 function getCanvasCoords(e) {
   const rect = canvas.getBoundingClientRect();
   return {
@@ -1217,7 +1257,10 @@ canvas.addEventListener('contextmenu', e => {
   if (game.screen === 'select') e.preventDefault();
 });
 
-canvas.addEventListener('mousedown', e => {
+canvas.addEventListener('pointerdown', e => {
+  if (e.pointerType === 'touch') {
+    e.preventDefault();
+  }
   game.idleFrames = 0;
   sound.unlock();
   if (!sound.muted && sound.musicMode !== 'none') {
@@ -1502,6 +1545,16 @@ if (attractToggleBtn) {
   });
 }
 
+if (touchToggleBtn) {
+  touchToggleBtn.addEventListener('click', () => {
+    sound.unlock();
+    touchCtrl.cycleMode();
+    sound.playMenu();
+    updateHeaderAndBars();
+    touchToggleBtn.blur();
+  });
+}
+
 audioToggleBtn.addEventListener('click', () => {
   sound.unlock();
   game.idleFrames = 0;
@@ -1511,13 +1564,76 @@ audioToggleBtn.addEventListener('click', () => {
   audioToggleBtn.blur();
 });
 
-fullscreenBtn.addEventListener('click', () => {
-  if (!document.fullscreenElement) {
-    stageContainer.requestFullscreen?.().catch(() => {});
-  } else {
-    document.exitFullscreen?.().catch(() => {});
+function isAnyFullscreen() {
+  return Boolean(
+    document.fullscreenElement ||
+    document.webkitFullscreenElement ||
+    stageContainer.classList.contains('is-viewport-fullscreen')
+  );
+}
+
+function syncFullscreenUI() {
+  const active = isAnyFullscreen();
+  if (fullscreenBtn) {
+    fullscreenBtn.textContent = active ? 'Quitter Plein Écran' : 'Plein Écran';
+    fullscreenBtn.classList.toggle('is-active', active);
   }
+  if (exitPseudoFullscreenBtn) {
+    exitPseudoFullscreenBtn.hidden = !stageContainer.classList.contains('is-viewport-fullscreen');
+  }
+}
+
+function exitFullscreenSafe() {
+  stageContainer.classList.remove('is-viewport-fullscreen');
+  document.body.classList.remove('has-viewport-fullscreen');
+  if (document.fullscreenElement && document.exitFullscreen) {
+    document.exitFullscreen().catch(() => {});
+  } else if (document.webkitFullscreenElement && document.webkitExitFullscreen) {
+    document.webkitExitFullscreen();
+  }
+  syncFullscreenUI();
+}
+
+function toggleFullscreenSafe() {
+  if (isAnyFullscreen()) {
+    exitFullscreenSafe();
+    return;
+  }
+  const req = stageContainer.requestFullscreen || stageContainer.webkitRequestFullscreen;
+  if (typeof req === 'function') {
+    Promise.resolve(req.call(stageContainer))
+      .then(() => syncFullscreenUI())
+      .catch(() => {
+        // Fallback fluide pour iPadOS / iOS Safari lorsque requestFullscreen est bloqué
+        stageContainer.classList.add('is-viewport-fullscreen');
+        document.body.classList.add('has-viewport-fullscreen');
+        syncFullscreenUI();
+      });
+  } else {
+    stageContainer.classList.add('is-viewport-fullscreen');
+    document.body.classList.add('has-viewport-fullscreen');
+    syncFullscreenUI();
+  }
+}
+
+fullscreenBtn.addEventListener('click', () => {
+  sound.unlock();
+  toggleFullscreenSafe();
   fullscreenBtn.blur();
+});
+
+if (exitPseudoFullscreenBtn) {
+  exitPseudoFullscreenBtn.addEventListener('click', () => {
+    exitFullscreenSafe();
+  });
+}
+
+document.addEventListener('fullscreenchange', syncFullscreenUI);
+document.addEventListener('webkitfullscreenchange', syncFullscreenUI);
+window.addEventListener('keydown', e => {
+  if (e.code === 'Escape' && stageContainer.classList.contains('is-viewport-fullscreen')) {
+    exitFullscreenSafe();
+  }
 });
 
 rematchBtn.addEventListener('click', () => {
