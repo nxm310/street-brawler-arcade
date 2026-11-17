@@ -45,6 +45,11 @@ const triggerSpecialP2Btn = document.getElementById('triggerSpecialP2Btn');
 const refillSuperBtn = document.getElementById('refillSuperBtn');
 const controlsP2Text = document.getElementById('controlsP2Text');
 
+// Vitesse du jeu réduite de 30% (0.70x) et normalisée à 60 FPS (même sur écran 120Hz)
+const GAME_SPEED = 0.70;
+const GRAVITY_SCALE = GAME_SPEED * GAME_SPEED;
+const sDur = frames => Math.max(1, Math.round(frames / GAME_SPEED));
+
 // État global du jeu
 const game = {
   screen: 'menu', // 'menu' | 'select' | 'map' | 'vs' | 'intro' | 'fight' | 'roundOver' | 'matchOver'
@@ -63,6 +68,7 @@ const game = {
   phaseTimer: 0,
   phaseDuration: 0,
   tick: 0,
+  animTick: 0,
   shake: 0,
   specialFx: null,
   particles: [],
@@ -85,17 +91,22 @@ function createFighter(id, x, facing) {
     trailHp: 100,
     superMeter: 0, // Démarre à 0% et se recharge avec les coups portés !
     rounds: 0,
-    state: 'idle', // 'idle' | 'walk' | 'jump' | 'crouch' | 'block' | 'parry' | 'light' | 'heavy' | 'kick' | 'sweep' | 'jump_punch' | 'jump_kick' | 'special' | 'hit' | 'down' | 'ko'
+    state: 'idle', // 'idle' | 'walk' | 'jump' | 'crouch' | 'crouch_punch' | 'block' | 'parry' | 'light' | 'heavy' | 'kick' | 'sweep' | 'headbutt' | 'shoryuken' | 'spinkick' | 'jump_punch' | 'jump_kick' | 'special' | 'hit' | 'down' | 'ko'
     stateTimer: 0,
+    stateDuration: 1,
     parryWindow: 0,
     parryCooldown: 0,
+    crouchGuard: false,
+    lastAttackType: '',
+    repeatCount: 0,
+    secondHitApplied: false,
     attackDidHit: false,
     comboCount: 0,
     comboTimer: 0,
     botTactic: 'observe',
-    botTacticTimer: 45,
-    botAttackCooldown: 55,
-    botSpecialCooldown: 210,
+    botTacticTimer: sDur(45),
+    botAttackCooldown: sDur(55),
+    botSpecialCooldown: sDur(210),
     botMoveDir: 0,
     def
   };
@@ -156,8 +167,8 @@ function startAttractCycle() {
   resetRoundFighters(false);
   game.fighters[0].superMeter = 65;
   game.fighters[1].superMeter = 65;
-  game.phaseDuration = 140;
-  game.phaseTimer = 140;
+  game.phaseDuration = sDur(140);
+  game.phaseTimer = game.phaseDuration;
   setScreen('map');
 }
 
@@ -180,14 +191,14 @@ function startTourAndFight() {
   resetRoundFighters(false);
 
   // Lance d'abord la Carte de France animée (pointillés d'une ville à l'autre)
-  game.phaseDuration = 155;
-  game.phaseTimer = 155;
+  game.phaseDuration = sDur(155);
+  game.phaseTimer = game.phaseDuration;
   setScreen('map');
 }
 
 function enterVsScreen() {
-  game.phaseDuration = 110;
-  game.phaseTimer = 110;
+  game.phaseDuration = sDur(110);
+  game.phaseTimer = game.phaseDuration;
   setScreen('vs');
   sound.playVsFanfare();
 }
@@ -196,9 +207,9 @@ function enterIntroRound() {
   sound.playRoundStart();
   setScreen('intro');
   game.announcement = `ROUND ${game.roundNumber}`;
-  game.announcementTimer = 75;
-  game.phaseDuration = 90;
-  game.phaseTimer = 90;
+  game.announcementTimer = sDur(75);
+  game.phaseDuration = sDur(90);
+  game.phaseTimer = game.phaseDuration;
 }
 
 function startNextRound() {
@@ -210,14 +221,15 @@ function startNextRound() {
 function spawnParticles(x, y, color, count, speed = 7) {
   for (let i = 0; i < count; i++) {
     const ang = Math.random() * Math.PI * 2;
-    const spd = (0.35 + Math.random()) * speed;
+    const spd = (0.35 + Math.random()) * speed * GAME_SPEED;
+    const life = sDur(24 + Math.random() * 24);
     game.particles.push({
       x,
       y,
       vx: Math.cos(ang) * spd,
-      vy: Math.sin(ang) * spd - 2,
-      life: 24 + Math.random() * 24,
-      maxLife: 48,
+      vy: Math.sin(ang) * spd - 2 * GAME_SPEED,
+      life,
+      maxLife: sDur(48),
       color,
       size: 4 + Math.random() * 6
     });
@@ -225,15 +237,16 @@ function spawnParticles(x, y, color, count, speed = 7) {
 }
 
 function addFloatingText(x, y, text, color = '#fde047', size = 24) {
+  const life = sDur(44);
   game.floatingTexts.push({
     x,
     y,
-    vy: -1.4,
+    vy: -1.4 * GAME_SPEED,
     text,
     color,
     size,
-    life: 44,
-    maxLife: 44
+    life,
+    maxLife: life
   });
 }
 
@@ -250,7 +263,7 @@ function updateHeaderAndBars() {
       ? 'MODE VEILLE : Simulation automatique IA vs IA (appuyez sur une touche pour jouer)'
       : game.mode === 'bot'
         ? 'BOT IA : contrôle automatique (difficulté réglable en haut)'
-        : 'J2 Local : ←/→ bouger · ↑ sauter · ↓ baisser · K Poing · L Pied (↓+L Balayette) · M Parade · O Spécial';
+        : 'J2 Local : ←/→ bouger · ↑ sauter · ↓ baisser · K poing · I uppercut · L pied (↓+L balayette) · P spin · U boule · M parade · O spécial';
 
   const inFight = game.screen === 'fight';
   triggerSpecialP1Btn.disabled = !inFight || game.isAttract;
@@ -285,7 +298,8 @@ function buildQuickArenaBar() {
 
 // --- LOGIQUE DE COMBAT & COUPS SPÉCIAUX ---
 const BUSY_STATES = new Set([
-  'hit', 'ko', 'down', 'light', 'heavy', 'kick', 'sweep', 'jump_punch', 'jump_kick', 'parry', 'special'
+  'hit', 'ko', 'down', 'light', 'heavy', 'crouch_punch', 'kick', 'sweep',
+  'headbutt', 'shoryuken', 'spinkick', 'jump_punch', 'jump_kick', 'parry', 'special'
 ]);
 
 function triggerAttack(attackerIdx, type) {
@@ -302,15 +316,20 @@ function triggerAttack(attackerIdx, type) {
       }
       return;
     }
+    const sd = sDur(80);
     f.superMeter = 0;
     f.state = 'special';
-    f.stateTimer = 80;
+    f.stateTimer = sd;
+    f.stateDuration = sd;
     f.attackDidHit = false;
+    f.secondHitApplied = false;
     f.vx = 0;
+    f.lastAttackType = 'special';
+    f.repeatCount = 0;
     game.specialFx = {
       attackerIdx,
       timer: 0,
-      duration: 80,
+      duration: sd,
       hitApplied: false
     };
     game.shake = 10;
@@ -321,48 +340,114 @@ function triggerAttack(attackerIdx, type) {
 
   if (type === 'parry') {
     if (f.y < FLOOR_Y || f.parryCooldown > 0) return;
+    const sd = sDur(16);
     f.state = 'parry';
-    f.stateTimer = 16;
-    f.parryWindow = 10;
-    f.parryCooldown = 28;
+    f.stateTimer = sd;
+    f.stateDuration = sd;
+    f.parryWindow = sDur(10);
+    f.parryCooldown = sDur(28);
     f.vx = 0;
+    f.lastAttackType = '';
+    f.repeatCount = 0;
     sound.playParry();
     return;
   }
 
+  // Suivi anti-spam réaliste (punit la répétition aveugle d'un même coup)
+  if (f.lastAttackType === type) {
+    f.repeatCount++;
+  } else {
+    f.lastAttackType = type;
+    f.repeatCount = 1;
+  }
+  f.attackDidHit = false;
+  f.secondHitApplied = false;
+
+  if (type === 'headbutt') {
+    const sd = sDur(26);
+    f.state = 'headbutt';
+    f.stateTimer = sd;
+    f.stateDuration = sd;
+    f.vx = f.facing * 5.8 * GAME_SPEED;
+    sound.playHeadbutt();
+    return;
+  }
+
+  if (type === 'shoryuken') {
+    const sd = sDur(28);
+    f.state = 'shoryuken';
+    f.stateTimer = sd;
+    f.stateDuration = sd;
+    f.vy = -14.2 * GAME_SPEED;
+    f.y = Math.min(f.y, FLOOR_Y - 4);
+    f.vx = f.facing * 3.8 * GAME_SPEED;
+    sound.playShoryuken();
+    spawnParticles(f.x, f.y - 90, f.def.accent || '#fde047', 12, 5);
+    return;
+  }
+
+  if (type === 'spinkick') {
+    const sd = sDur(32);
+    f.state = 'spinkick';
+    f.stateTimer = sd;
+    f.stateDuration = sd;
+    f.vy = -5.8 * GAME_SPEED;
+    f.y = Math.min(f.y, FLOOR_Y - 6);
+    f.vx = f.facing * 5.4 * GAME_SPEED;
+    sound.playSpinKick();
+    return;
+  }
+
   if (type === 'kick') {
-    f.attackDidHit = false;
     if (f.y < FLOOR_Y - 2) {
+      const sd = sDur(20);
       f.state = 'jump_kick';
-      f.stateTimer = 20;
+      f.stateTimer = sd;
+      f.stateDuration = sd;
       sound.playKick();
     } else if (f.state === 'crouch') {
+      const sd = sDur(25);
       f.state = 'sweep';
-      f.stateTimer = 24;
-      f.vx = f.facing * 5.2;
+      f.stateTimer = sd;
+      f.stateDuration = sd;
+      f.vx = f.facing * 1.8 * GAME_SPEED; // Pas réaliste bref, sans téléportation !
       sound.playSweep();
     } else {
+      const sd = sDur(24);
       f.state = 'kick';
-      f.stateTimer = 22;
-      f.vx = f.facing * 4.2;
+      f.stateTimer = sd;
+      f.stateDuration = sd;
+      f.vx = f.facing * 1.2 * GAME_SPEED; // Coup de pied sur place réaliste avec vraie phase de récupération
       sound.playKick();
     }
     return;
   }
 
   if (f.y < FLOOR_Y - 2) {
+    const sd = sDur(18);
     f.state = 'jump_punch';
-    f.stateTimer = 18;
-    f.attackDidHit = false;
+    f.stateTimer = sd;
+    f.stateDuration = sd;
     sound.playPunch(type === 'heavy');
     return;
   }
 
+  if (f.state === 'crouch' && type === 'light') {
+    const sd = sDur(16);
+    f.state = 'crouch_punch';
+    f.stateTimer = sd;
+    f.stateDuration = sd;
+    f.vx = f.facing * 0.8 * GAME_SPEED;
+    sound.playLight();
+    return;
+  }
+
+  const sd = sDur(type === 'light' ? 15 : 25);
   f.state = type;
-  f.stateTimer = type === 'light' ? 18 : 26;
-  f.attackDidHit = false;
+  f.stateTimer = sd;
+  f.stateDuration = sd;
   if (f.y >= FLOOR_Y) {
-    f.vx = f.facing * (type === 'light' ? 3.2 : 4.8);
+    f.vx = f.facing * (type === 'light' ? 1.0 : 2.2) * GAME_SPEED;
   }
   if (type === 'light') sound.playLight();
   else sound.playHeavy();
@@ -373,57 +458,126 @@ function applyHit(attackerIdx, dmg, knockback, isSpecial = false, attackKind = '
   const defender = game.fighters[1 - attackerIdx];
   if (defender.state === 'ko') return;
 
+  // Esquive accroupie : un jab haut rapide ('light') passe au-dessus d'un combattant baissé !
+  if (
+    !isSpecial &&
+    attackKind === 'light' &&
+    (defender.state === 'crouch' || defender.state === 'crouch_punch' || defender.state === 'sweep')
+  ) {
+    addFloatingText(defender.x, defender.y - 165, 'ESQUIVE BASSE !', '#94a3b8', 17);
+    return;
+  }
+
+  // Invincibilité anti-air au démarrage du Shoryuken
+  if (!isSpecial && defender.state === 'shoryuken' && defender.stateTimer >= Math.round(defender.stateDuration * 0.7)) {
+    addFloatingText(defender.x, defender.y - 195, 'SHORYUKEN INVINCIBLE !', '#fde047', 17);
+    return;
+  }
+
   // Parade Parfaite (Perfect Parry SF3) : 0 dégât + contre-charge Super !
   if (defender.state === 'parry' && defender.parryWindow > 0 && !isSpecial) {
     defender.superMeter = Math.min(100, defender.superMeter + 22);
-    attacker.vx = -attacker.facing * 7.5;
+    attacker.vx = -attacker.facing * 8.0 * GAME_SPEED;
+    attacker.stateTimer = Math.max(attacker.stateTimer, sDur(12));
     sound.playPerfectParry();
     spawnParticles(defender.x, defender.y - 115, '#fde047', 22, 7);
     addFloatingText(defender.x, defender.y - 190, '⚡ PARADE PARFAITE ! +22%', '#fde047', 23);
     return;
   }
 
-  const isBlocking = defender.state === 'block' || defender.state === 'parry';
-  const finalDmg = isBlocking ? Math.max(2, Math.round(dmg * 0.25)) : dmg;
+  // Règles réalistes Haut / Bas / Brise-garde :
+  // - La balayette ('sweep') touche bas : il faut se baisser ('crouchGuard') ou sauter, pas juste bloquer debout !
+  // - Les coups sautés / boule écrasent la garde basse.
+  const canBlock =
+    defender.state === 'block' ||
+    defender.state === 'parry' ||
+    (attackKind === 'sweep' && defender.state === 'crouch');
+  let isBlocking = canBlock;
+  if (attackKind === 'sweep' && defender.state === 'block' && !defender.crouchGuard) {
+    isBlocking = false;
+  }
+  if (isSpecial) {
+    isBlocking = defender.state === 'block' || defender.state === 'parry';
+  }
+
+  // Coup de boule ('headbutt') : BRISE LA GARDE si simplement bloqué debout !
+  const isGuardCrush = !isSpecial && attackKind === 'headbutt' && defender.state === 'block';
+  if (isGuardCrush) {
+    isBlocking = false;
+  }
+
+  // Réduction progressive en cas de spam répété d'un même coup (anti-spam !)
+  let spamScale = 1.0;
+  if (!isSpecial && attacker.repeatCount >= 3) {
+    spamScale = attacker.repeatCount === 3 ? 0.65 : 0.45;
+  }
+
+  const scaledDmg = Math.max(2, Math.round(dmg * spamScale));
+  const finalDmg = isBlocking
+    ? Math.max(1, Math.round(scaledDmg * 0.22))
+    : isGuardCrush
+      ? Math.max(4, Math.round(scaledDmg * 0.65))
+      : scaledDmg;
 
   defender.hp = Math.max(0, defender.hp - finalDmg);
-  defender.vx = (attacker.x < defender.x ? 1 : -1) * (isBlocking ? knockback * 0.45 : knockback);
+  const pushDir = attacker.x < defender.x ? 1 : -1;
+  defender.vx = pushDir * (isBlocking ? knockback * 0.72 : knockback) * GAME_SPEED;
+  if (isBlocking && !isSpecial) {
+    // Recul mutuel au contact de garde pour éviter de coller indéfiniment en spammant
+    attacker.vx = -pushDir * 5.2 * GAME_SPEED;
+  }
 
-  // Recharge progressive du Coup Spécial en fonction des coups donnés
-  const meterGain = isSpecial
+  // Recharge progressive du Coup Spécial (diminuée en cas de spam)
+  const meterBase = isSpecial
     ? 0
     : isBlocking
-      ? 8
-      : attackKind === 'heavy'
-        ? 26
+      ? 6
+      : attackKind === 'heavy' || attackKind === 'shoryuken' || attackKind === 'headbutt'
+        ? 24
         : attackKind === 'kick' || attackKind === 'sweep'
-          ? 22
-          : 18;
-  attacker.superMeter = Math.min(100, attacker.superMeter + meterGain);
-  defender.superMeter = Math.min(100, defender.superMeter + 6);
+          ? 16
+          : 15;
+  attacker.superMeter = Math.min(100, attacker.superMeter + Math.round(meterBase * spamScale));
+  defender.superMeter = Math.min(100, defender.superMeter + 7);
 
   if (isBlocking) {
     sound.playBlock();
     spawnParticles(defender.x, defender.y - 95, '#38bdf8', 14, 5);
-    addFloatingText(defender.x, defender.y - 175, `GARDE -${finalDmg}%`, '#38bdf8', 22);
+    addFloatingText(defender.x, defender.y - 175, `GARDE -${finalDmg}%`, '#38bdf8', 20);
   } else {
     if (attackKind === 'sweep') {
       defender.state = 'down';
-      defender.stateTimer = 28;
-      defender.vy = -5;
+      defender.stateTimer = sDur(28);
+      defender.stateDuration = defender.stateTimer;
+      defender.vy = -5.5 * GAME_SPEED;
+    } else if (attackKind === 'shoryuken') {
+      defender.state = 'hit';
+      defender.stateTimer = sDur(24);
+      defender.stateDuration = defender.stateTimer;
+      defender.vy = -9.5 * GAME_SPEED;
     } else {
       defender.state = 'hit';
-      defender.stateTimer = isSpecial ? 26 : 14;
+      defender.stateTimer = sDur(isSpecial ? 26 : isGuardCrush ? 22 : 16);
+      defender.stateDuration = defender.stateTimer;
     }
     defender.comboCount++;
-    defender.comboTimer = 85;
-    game.shake = isSpecial ? 16 : 8;
+    defender.comboTimer = sDur(85);
+    game.shake = isSpecial ? 16 : isGuardCrush || attackKind === 'shoryuken' ? 11 : 7;
     const hitCol = attacker.id === 'darkmada' && isSpecial ? '#f472b6' : attacker.def.color;
     spawnParticles(defender.x, defender.y - 110, hitCol, isSpecial ? 36 : 16, isSpecial ? 10 : 6);
 
     let floatLabel = `-${finalDmg}%`;
-    if (attackKind === 'sweep') {
+    if (isGuardCrush) {
+      sound.playGuardCrush();
+      floatLabel = `BRISE-GARDE ! -${finalDmg}%`;
+    } else if (attackKind === 'sweep') {
       floatLabel = `BALAYETTE ! -${finalDmg}%`;
+    } else if (attackKind === 'shoryuken') {
+      floatLabel = `SHORYUKEN ! -${finalDmg}%`;
+    } else if (attackKind === 'spinkick') {
+      floatLabel = `SPIN KICK ! -${finalDmg}%`;
+    } else if (attackKind === 'headbutt') {
+      floatLabel = `COUP DE BOULE ! -${finalDmg}%`;
     } else if (isSpecial) {
       if (attacker.id === 'darkmada') floatLabel = `SUSHI ♥ -${finalDmg}%`;
       else if (attacker.id === 'koll') floatLabel = `LAPIN-AIMANT 🐰 -${finalDmg}%`;
@@ -435,14 +589,14 @@ function applyHit(attackerIdx, dmg, knockback, isSpecial = false, attackKind = '
       defender.x,
       defender.y - 185,
       floatLabel,
-      isSpecial ? '#fde047' : attackKind === 'sweep' ? '#38bdf8' : '#ffffff',
-      isSpecial ? 30 : 24
+      isSpecial || attackKind === 'shoryuken' ? '#fde047' : isGuardCrush ? '#fb923c' : attackKind === 'sweep' || attackKind === 'spinkick' ? '#38bdf8' : '#ffffff',
+      isSpecial ? 30 : 23
     );
   }
 
   if (defender.hp <= 0) {
     defender.state = 'ko';
-    defender.vy = -8;
+    defender.vy = -8 * GAME_SPEED;
     endRound(attackerIdx, 'K.O.!');
   }
 }
@@ -452,8 +606,8 @@ function endRound(winnerIdx, reasonText) {
   sound.playKO();
   game.screen = 'roundOver';
   game.announcement = reasonText;
-  game.announcementTimer = 110;
-  game.phaseTimer = 115;
+  game.announcementTimer = sDur(110);
+  game.phaseTimer = sDur(115);
 
   if (winnerIdx === 0 || winnerIdx === 1) {
     game.fighters[winnerIdx].rounds++;
@@ -498,6 +652,7 @@ function updateHumanFighter(idx) {
 
   const input = readPlayerInput(idx);
   const onGround = f.y >= FLOOR_Y;
+  f.crouchGuard = Boolean(onGround && input.down);
 
   if (onGround) {
     f.facing = f.x <= opp.x ? 1 : -1;
@@ -505,7 +660,9 @@ function updateHumanFighter(idx) {
 
   const holdingBack = (f.facing === 1 && input.left) || (f.facing === -1 && input.right);
   const oppAttacking =
-    opp.state === 'light' || opp.state === 'heavy' || opp.state === 'kick' || opp.state === 'sweep' ||
+    opp.state === 'light' || opp.state === 'heavy' || opp.state === 'crouch_punch' ||
+    opp.state === 'kick' || opp.state === 'sweep' || opp.state === 'headbutt' ||
+    opp.state === 'shoryuken' || opp.state === 'spinkick' ||
     opp.state === 'jump_punch' || opp.state === 'jump_kick' || opp.state === 'special';
 
   if (onGround && (input.down || (holdingBack && oppAttacking))) {
@@ -519,17 +676,17 @@ function updateHumanFighter(idx) {
   }
 
   if (onGround && input.up) {
-    f.vy = f.def.jumpForce;
+    f.vy = f.def.jumpForce * GAME_SPEED;
     f.y -= 2;
     f.state = 'jump';
     sound.playJump();
   }
 
   if (input.left && !input.right) {
-    f.vx = -f.def.speed;
+    f.vx = -f.def.speed * GAME_SPEED;
     if (onGround) f.state = 'walk';
   } else if (input.right && !input.left) {
-    f.vx = f.def.speed;
+    f.vx = f.def.speed * GAME_SPEED;
     if (onGround) f.state = 'walk';
   } else {
     f.vx *= 0.6;
@@ -542,20 +699,20 @@ function updateHumanFighter(idx) {
 function pickBotTactic(bot, dist) {
   const r = Math.random();
   if (dist > 420) {
-    if (r < 0.45) return { tactic: 'approach', dur: 28 + Math.floor(Math.random() * 22) };
-    if (r < 0.80) return { tactic: 'footsies', dur: 32 + Math.floor(Math.random() * 24) };
-    return { tactic: 'observe', dur: 30 + Math.floor(Math.random() * 22) };
+    if (r < 0.45) return { tactic: 'approach', dur: sDur(28 + Math.floor(Math.random() * 22)) };
+    if (r < 0.80) return { tactic: 'footsies', dur: sDur(32 + Math.floor(Math.random() * 24)) };
+    return { tactic: 'observe', dur: sDur(30 + Math.floor(Math.random() * 22)) };
   }
   if (dist >= 195) {
-    if (r < 0.32) return { tactic: 'observe', dur: 28 + Math.floor(Math.random() * 24) };
-    if (r < 0.65) return { tactic: 'footsies', dur: 34 + Math.floor(Math.random() * 26) };
-    if (r < 0.85) return { tactic: 'approach', dur: 24 + Math.floor(Math.random() * 18) };
-    return { tactic: 'retreat', dur: 22 + Math.floor(Math.random() * 18) };
+    if (r < 0.32) return { tactic: 'observe', dur: sDur(28 + Math.floor(Math.random() * 24)) };
+    if (r < 0.65) return { tactic: 'footsies', dur: sDur(34 + Math.floor(Math.random() * 26)) };
+    if (r < 0.85) return { tactic: 'approach', dur: sDur(24 + Math.floor(Math.random() * 18)) };
+    return { tactic: 'retreat', dur: sDur(22 + Math.floor(Math.random() * 18)) };
   }
-  if (r < 0.35) return { tactic: 'retreat', dur: 26 + Math.floor(Math.random() * 18) };
-  if (r < 0.60) return { tactic: 'observe', dur: 24 + Math.floor(Math.random() * 20) };
-  if (r < 0.85) return { tactic: 'approach', dur: 20 + Math.floor(Math.random() * 14) };
-  return { tactic: 'footsies', dur: 24 + Math.floor(Math.random() * 16) };
+  if (r < 0.35) return { tactic: 'retreat', dur: sDur(26 + Math.floor(Math.random() * 18)) };
+  if (r < 0.60) return { tactic: 'observe', dur: sDur(24 + Math.floor(Math.random() * 20)) };
+  if (r < 0.85) return { tactic: 'approach', dur: sDur(20 + Math.floor(Math.random() * 14)) };
+  return { tactic: 'footsies', dur: sDur(24 + Math.floor(Math.random() * 16)) };
 }
 
 function updateBotFighter(botIdx = 1) {
@@ -575,45 +732,79 @@ function updateBotFighter(botIdx = 1) {
 
   const dist = Math.abs(bot.x - opp.x);
   const oppAttacking =
-    opp.state === 'light' || opp.state === 'heavy' || opp.state === 'kick' || opp.state === 'sweep' || opp.state === 'special';
+    opp.state === 'light' || opp.state === 'heavy' || opp.state === 'crouch_punch' ||
+    opp.state === 'kick' || opp.state === 'sweep' || opp.state === 'headbutt' ||
+    opp.state === 'spinkick' || opp.state === 'shoryuken' || opp.state === 'special';
+  const oppRecovery =
+    BUSY_STATES.has(opp.state) && opp.state !== 'hit' && opp.state !== 'down' && opp.state !== 'ko' &&
+    opp.stateTimer > 0 && opp.stateTimer <= sDur(10);
+  const oppSpamming = opp.repeatCount >= 2;
 
   const diff = game.isAttract ? 'normal' : game.botDiff;
-  const blockChance = diff === 'easy' ? 0.22 : diff === 'normal' ? 0.42 : 0.62;
-  const parryChance = diff === 'easy' ? 0.10 : diff === 'normal' ? 0.25 : 0.42;
-  const atkRecovery = diff === 'easy' ? 82 : diff === 'normal' ? 52 : 36;
-  const specialRate = game.isAttract ? 0.045 : diff === 'easy' ? 0.008 : diff === 'normal' ? 0.022 : 0.04;
+  const blockChance = diff === 'easy' ? 0.32 : diff === 'normal' ? 0.56 : 0.78;
+  const parryChance = diff === 'easy' ? 0.14 : diff === 'normal' ? 0.34 : 0.55;
+  const atkRecovery = sDur(diff === 'easy' ? 68 : diff === 'normal' ? 42 : 28);
+  const specialRate = game.isAttract ? 0.035 : diff === 'easy' ? 0.007 : diff === 'normal' ? 0.018 : 0.032;
 
   // Attaque aérienne si le bot est déjà en l'air proche de l'adversaire
-  if (!onGround && dist < 240 && bot.botAttackCooldown <= 0 && bot.vy > -4) {
+  if (!onGround && dist < 245 && bot.botAttackCooldown <= 0 && bot.vy > -4 * GAME_SPEED) {
     bot.botAttackCooldown = atkRecovery;
     triggerAttack(botIdx, Math.random() < 0.6 ? 'kick' : 'light');
     return;
   }
 
-  if (onGround && oppAttacking && dist < 245 && bot.botTactic !== 'defend') {
-    if (bot.parryCooldown <= 0 && Math.random() < parryChance) {
+  // Anti-air Shoryuken si l'adversaire saute sur le bot !
+  if (onGround && opp.y < FLOOR_Y - 45 && dist < 245 && bot.botAttackCooldown <= 0 && Math.random() < (diff === 'easy' ? 0.06 : 0.18)) {
+    bot.botAttackCooldown = atkRecovery;
+    triggerAttack(botIdx, 'shoryuken');
+    return;
+  }
+
+  // Réaction défensive + punition anti-spam (bloque/pare les kicks répétés puis balaye/contre !)
+  if (onGround && oppAttacking && dist < 250 && bot.botTactic !== 'defend') {
+    const reactiveBlock = oppSpamming ? Math.min(0.95, blockChance + 0.28) : blockChance;
+    const reactiveParry = oppSpamming ? Math.min(0.75, parryChance + 0.22) : parryChance;
+    if (bot.parryCooldown <= 0 && Math.random() < reactiveParry) {
       triggerAttack(botIdx, 'parry');
       return;
     }
-    if (Math.random() < blockChance) {
+    if (Math.random() < reactiveBlock) {
+      bot.crouchGuard = opp.state === 'sweep';
       bot.botTactic = 'defend';
-      bot.botTacticTimer = 18;
+      bot.botTacticTimer = sDur(15);
     }
+  }
+
+  // Punition immédiate si l'adversaire vient de rater / bloquer un coup de pied devant le bot
+  if (onGround && oppRecovery && dist < 245 && bot.botAttackCooldown <= 0) {
+    bot.botAttackCooldown = atkRecovery;
+    const rc = Math.random();
+    if (rc < 0.32) {
+      bot.state = 'crouch';
+      triggerAttack(botIdx, 'kick');
+    } else if (rc < 0.62) {
+      triggerAttack(botIdx, 'headbutt');
+    } else {
+      bot.state = 'crouch';
+      triggerAttack(botIdx, 'light');
+    }
+    return;
   }
 
   if (bot.botTactic === 'defend') {
     bot.vx = 0;
     bot.state = 'block';
     if (bot.botTacticTimer <= 0) {
-      bot.botTactic = Math.random() < 0.5 ? 'retreat' : 'observe';
-      bot.botTacticTimer = 26;
+      bot.crouchGuard = false;
+      bot.botTactic = oppSpamming ? 'approach' : (Math.random() < 0.5 ? 'retreat' : 'observe');
+      bot.botTacticTimer = sDur(22);
     }
     return;
   }
 
   if (bot.superMeter >= 100 && !game.specialFx && bot.botSpecialCooldown <= 0 && dist < 780 && Math.random() < specialRate) {
-    bot.botSpecialCooldown = 220;
-    bot.botAttackCooldown = atkRecovery + 20;
+    bot.botSpecialCooldown = sDur(220);
+    bot.botAttackCooldown = atkRecovery + sDur(20);
     triggerAttack(botIdx, 'special');
     return;
   }
@@ -629,36 +820,52 @@ function updateBotFighter(botIdx = 1) {
     }
   }
 
-  const speedScale = diff === 'easy' ? 0.72 : diff === 'normal' ? 0.85 : 0.95;
+  const speedScale = (diff === 'easy' ? 0.75 : diff === 'normal' ? 0.88 : 0.98) * GAME_SPEED;
   if (bot.botTactic === 'observe') {
     bot.vx = 0;
   } else if (bot.botTactic === 'retreat') {
     bot.vx = -dirToOpp * bot.def.speed * 0.72 * speedScale;
   } else if (bot.botTactic === 'footsies') {
-    bot.vx = bot.botMoveDir * bot.def.speed * 0.58 * speedScale;
+    bot.vx = bot.botMoveDir * bot.def.speed * 0.62 * speedScale;
   } else if (bot.botTactic === 'approach') {
-    bot.vx = dist > 180 ? dirToOpp * bot.def.speed * 0.85 * speedScale : 0;
-    if (onGround && dist > 235 && dist < 410 && Math.random() < 0.02) {
-      bot.vy = bot.def.jumpForce;
+    bot.vx = dist > 175 ? dirToOpp * bot.def.speed * 0.88 * speedScale : 0;
+    if (onGround && dist > 235 && dist < 430 && Math.random() < 0.018) {
+      bot.vy = bot.def.jumpForce * GAME_SPEED;
       bot.y -= 2;
+      bot.vx = dirToOpp * bot.def.speed * 0.9 * GAME_SPEED;
       bot.state = 'jump';
     }
   }
 
-  if (onGround && dist < 235 && bot.botAttackCooldown <= 0 && (bot.botTactic === 'approach' || (bot.botTactic === 'footsies' && Math.random() < 0.08))) {
+  // Spinning Kick à mi-distance ou contre un adversaire passif
+  if (onGround && dist >= 200 && dist < 320 && bot.botAttackCooldown <= 0 && Math.random() < 0.022) {
+    bot.botAttackCooldown = atkRecovery + sDur(12);
+    triggerAttack(botIdx, 'spinkick');
+    return;
+  }
+
+  // Mixup riche au corps à corps : jab, poing baissé, coup de pied, balayette, coup de boule, Shoryuken
+  if (onGround && dist < 230 && bot.botAttackCooldown <= 0 && (bot.botTactic === 'approach' || (bot.botTactic === 'footsies' && Math.random() < 0.07))) {
     bot.botAttackCooldown = atkRecovery;
-    bot.botTactic = Math.random() < 0.55 ? 'retreat' : 'observe';
-    bot.botTacticTimer = 26 + Math.floor(Math.random() * 22);
+    bot.botTactic = Math.random() < 0.50 ? 'retreat' : 'observe';
+    bot.botTacticTimer = sDur(24 + Math.floor(Math.random() * 20));
     const rAtk = Math.random();
-    if (rAtk < 0.24) {
+    if (opp.state === 'block' && rAtk < 0.48) {
+      triggerAttack(botIdx, 'headbutt');
+    } else if (rAtk < 0.20) {
       bot.state = 'crouch';
-      triggerAttack(botIdx, 'kick'); // Balayette !
-    } else if (rAtk < 0.56) {
-      triggerAttack(botIdx, 'kick');
-    } else if (rAtk < 0.82) {
       triggerAttack(botIdx, 'light');
+    } else if (rAtk < 0.38) {
+      bot.state = 'crouch';
+      triggerAttack(botIdx, 'kick');
+    } else if (rAtk < 0.56) {
+      triggerAttack(botIdx, 'light');
+    } else if (rAtk < 0.74) {
+      triggerAttack(botIdx, 'kick');
+    } else if (rAtk < 0.88) {
+      triggerAttack(botIdx, 'headbutt');
     } else {
-      triggerAttack(botIdx, 'heavy');
+      triggerAttack(botIdx, 'shoryuken');
     }
     return;
   }
@@ -671,6 +878,7 @@ function updateBotFighter(botIdx = 1) {
 // --- BOUCLE PRINCIPALE 60 FPS ---
 function stepPhysics() {
   game.tick++;
+  game.animTick += GAME_SPEED;
 
   if (game.shake > 0) {
     game.shake *= 0.86;
@@ -713,7 +921,7 @@ function stepPhysics() {
     const p = game.particles[i];
     p.x += p.vx;
     p.y += p.vy;
-    p.vy += 0.25;
+    p.vy += 0.25 * GRAVITY_SCALE;
     p.life--;
     if (p.life <= 0) game.particles.splice(i, 1);
   }
@@ -726,9 +934,9 @@ function stepPhysics() {
 
   if (game.screen === 'intro') {
     game.phaseTimer--;
-    if (game.phaseTimer === 32) {
+    if (game.phaseTimer === sDur(32)) {
       game.announcement = 'FIGHT!';
-      game.announcementTimer = 32;
+      game.announcementTimer = sDur(32);
     }
     if (game.phaseTimer <= 0) {
       setScreen('fight');
@@ -739,12 +947,12 @@ function stepPhysics() {
   if (game.screen === 'roundOver') {
     game.phaseTimer--;
     game.fighters.forEach(f => {
-      f.vy += 0.85;
+      f.vy += 0.85 * GRAVITY_SCALE;
       f.y = Math.min(FLOOR_Y, f.y + f.vy);
       if (f.y >= FLOOR_Y) f.vy = 0;
-      f.vx *= 0.85;
+      f.vx *= 0.89;
       f.x = Math.max(95, Math.min(STAGE_W - 95, f.x + f.vx));
-      if (f.trailHp > f.hp) f.trailHp = Math.max(f.hp, f.trailHp - 0.6);
+      if (f.trailHp > f.hp) f.trailHp = Math.max(f.hp, f.trailHp - 0.6 * GAME_SPEED);
     });
 
     if (game.phaseTimer <= 0) {
@@ -765,7 +973,7 @@ function stepPhysics() {
   if (game.screen !== 'fight') return;
 
   // Timer de manche
-  game.timer = Math.max(0, game.timer - 1 / 60);
+  game.timer = Math.max(0, game.timer - GAME_SPEED / 60);
   if (game.timer <= 0) {
     const [p1, p2] = game.fighters;
     const winner = p1.hp === p2.hp ? -1 : p1.hp > p2.hp ? 0 : 1;
@@ -779,18 +987,19 @@ function stepPhysics() {
     sp.timer++;
     const attacker = game.fighters[sp.attackerIdx];
     const defender = game.fighters[1 - sp.attackerIdx];
+    const spProg = sp.timer / Math.max(1, sp.duration);
 
     // KOLL — Le déguisement lapin attire irrésistiblement l'adversaire vers lui avant la décharge !
-    if (attacker && defender && attacker.id === 'koll' && sp.timer >= 5 && sp.timer <= 29) {
+    if (attacker && defender && attacker.id === 'koll' && spProg >= 0.06 && spProg <= 0.36) {
       const targetX = Math.max(135, Math.min(STAGE_W - 135, attacker.x + attacker.facing * 125));
       const dx = targetX - defender.x;
-      defender.x += Math.sign(dx) * Math.min(6.5, Math.abs(dx));
-      if (sp.timer % 3 === 0) {
-        spawnParticles(defender.x, defender.y - 130, sp.timer % 6 === 0 ? '#f472b6' : '#38bdf8', 4, 4);
+      defender.x += Math.sign(dx) * Math.min(6.5 * GAME_SPEED, Math.abs(dx));
+      if (sp.timer % 4 === 0) {
+        spawnParticles(defender.x, defender.y - 130, sp.timer % 8 === 0 ? '#f472b6' : '#38bdf8', 4, 4);
       }
     }
 
-    if (sp.timer === 30 && !sp.hitApplied) {
+    if (sp.timer === Math.round(sp.duration * 0.375) && !sp.hitApplied) {
       sp.hitApplied = true;
       if (Math.abs(attacker.x - defender.x) < 1100) {
         applyHit(sp.attackerIdx, attacker.def.specialDmg, 14, true, 'special');
@@ -801,7 +1010,7 @@ function stepPhysics() {
     }
   }
 
-  const freezeActive = game.specialFx && game.specialFx.timer < 18;
+  const freezeActive = game.specialFx && game.specialFx.timer < Math.round(game.specialFx.duration * 0.225);
   if (!freezeActive) {
     if (game.isAttract) {
       updateBotFighter(0);
@@ -813,9 +1022,9 @@ function stepPhysics() {
     }
   }
 
-  // Physique & Collisions d'attaques avec portée alignée sur les sprites pixel-art
+  // Physique & Collisions d'attaques avec portée et fenêtres normalisées par ratio 0..1
   game.fighters.forEach((f, idx) => {
-    if (f.trailHp > f.hp) f.trailHp = Math.max(f.hp, f.trailHp - 0.55);
+    if (f.trailHp > f.hp) f.trailHp = Math.max(f.hp, f.trailHp - 0.55 * GAME_SPEED);
     if (f.comboTimer > 0) f.comboTimer--;
     else f.comboCount = 0;
     if (f.parryWindow > 0) f.parryWindow--;
@@ -823,29 +1032,72 @@ function stepPhysics() {
 
     if (f.stateTimer > 0) {
       f.stateTimer--;
+      const atkProg = f.stateDuration > 0 ? 1 - f.stateTimer / f.stateDuration : 0;
+
+      // Freine la glissade sur place des attaques debout/accroupies (fini l'avance automatique de 90px!)
+      if (f.y >= FLOOR_Y && (f.state === 'light' || f.state === 'heavy' || f.state === 'crouch_punch' || f.state === 'kick' || f.state === 'sweep' || f.state === 'hit' || f.state === 'down')) {
+        f.vx *= 0.82;
+      } else if (f.state === 'headbutt') {
+        f.vx *= 0.91;
+      }
+
       const isMelee =
-        f.state === 'light' || f.state === 'heavy' || f.state === 'kick' || f.state === 'sweep' ||
+        f.state === 'light' || f.state === 'heavy' || f.state === 'crouch_punch' ||
+        f.state === 'kick' || f.state === 'sweep' || f.state === 'headbutt' ||
+        f.state === 'shoryuken' || f.state === 'spinkick' ||
         f.state === 'jump_punch' || f.state === 'jump_kick';
       if (isMelee) {
         const opp = game.fighters[1 - idx];
         const reach =
-          f.state === 'heavy' ? 285
-          : f.state === 'kick' || f.state === 'jump_kick' ? 275
-          : f.state === 'sweep' ? 265
-          : 250;
-        const active =
-          f.state === 'heavy' || f.state === 'sweep' ? f.stateTimer >= 6 && f.stateTimer <= 20
-          : f.state === 'kick' || f.state === 'jump_kick' ? f.stateTimer >= 5 && f.stateTimer <= 18
-          : f.stateTimer >= 5 && f.stateTimer <= 15;
+          f.state === 'heavy' ? 255
+          : f.state === 'kick' || f.state === 'spinkick' ? 235
+          : f.state === 'sweep' || f.state === 'shoryuken' || f.state === 'jump_kick' ? 230
+          : f.state === 'headbutt' ? 225
+          : 215;
+
+        let active = false;
+        let spinSecondWave = false;
+        if (f.state === 'spinkick') {
+          if (atkProg >= 0.15 && atkProg <= 0.38 && !f.attackDidHit) active = true;
+          else if (atkProg >= 0.53 && atkProg <= 0.76 && !f.secondHitApplied) {
+            active = true;
+            spinSecondWave = true;
+          }
+        } else if (f.state === 'shoryuken') {
+          active = atkProg >= 0.08 && atkProg <= 0.44;
+        } else if (f.state === 'headbutt') {
+          active = atkProg >= 0.25 && atkProg <= 0.62;
+        } else if (f.state === 'sweep') {
+          active = atkProg >= 0.26 && atkProg <= 0.56;
+        } else if (f.state === 'kick') {
+          active = atkProg >= 0.26 && atkProg <= 0.55; // Startup + fenetre serree + vraie recup
+        } else if (f.state === 'light' || f.state === 'crouch_punch') {
+          active = atkProg >= 0.20 && atkProg <= 0.55; // Jab rapide interrompt les kicks !
+        } else if (f.state === 'heavy') {
+          active = atkProg >= 0.26 && atkProg <= 0.60;
+        } else {
+          active = atkProg >= 0.12 && atkProg <= 0.72;
+        }
+
         const facingTarget = (f.facing === 1 && opp.x >= f.x - 45) || (f.facing === -1 && opp.x <= f.x + 45);
-        if (active && !f.attackDidHit && facingTarget && Math.abs(f.x - opp.x) <= reach && Math.abs(f.y - opp.y) <= 195) {
-          f.attackDidHit = true;
+        const canHit = spinSecondWave ? !f.secondHitApplied : !f.attackDidHit;
+        const yTol = f.state === 'shoryuken' ? 245 : 195;
+        if (active && canHit && facingTarget && Math.abs(f.x - opp.x) <= reach && Math.abs(f.y - opp.y) <= yTol) {
+          if (spinSecondWave) f.secondHitApplied = true;
+          else f.attackDidHit = true;
+
           const dmg =
-            f.state === 'heavy' ? f.def.heavyDmg
-            : f.state === 'sweep' ? (f.def.sweepDmg || f.def.kickDmg || f.def.heavyDmg)
-            : f.state === 'kick' || f.state === 'jump_kick' ? (f.def.kickDmg || 13)
+            f.state === 'heavy' || f.state === 'shoryuken' ? (f.def.heavyDmg || 14)
+            : f.state === 'headbutt' ? (f.def.headbuttDmg || 13)
+            : f.state === 'spinkick' ? (f.def.spinDmg || 6)
+            : f.state === 'sweep' ? (f.def.sweepDmg || 12)
+            : f.state === 'kick' || f.state === 'jump_kick' ? (f.def.kickDmg || 10)
             : f.def.lightDmg;
-          const kb = f.state === 'heavy' || f.state === 'sweep' ? 12 : f.state === 'kick' ? 10 : 7;
+          const kb =
+            f.state === 'heavy' || f.state === 'shoryuken' || f.state === 'headbutt' ? 12
+            : f.state === 'sweep' || f.state === 'kick' ? 10
+            : f.state === 'spinkick' ? 5
+            : 6;
           applyHit(idx, dmg, kb, false, f.state);
         }
       }
@@ -855,14 +1107,18 @@ function stepPhysics() {
     }
 
     if (!freezeActive) {
-      f.vy += 0.85;
+      // Flottaison légère style Chun-Li/Tatsumaki sur Spinning Kick + gravité ajustée à 0.70^2
+      const grav = (f.state === 'spinkick' ? 0.34 : 0.85) * GRAVITY_SCALE;
+      f.vy += grav;
       f.x += f.vx;
       f.y += f.vy;
 
       if (f.y >= FLOOR_Y) {
         f.y = FLOOR_Y;
         f.vy = 0;
-        if (f.state === 'jump') f.state = 'idle';
+        if (f.state === 'jump' || f.state === 'jump_punch' || f.state === 'jump_kick') {
+          f.state = 'idle';
+        }
       }
       f.x = Math.max(135, Math.min(STAGE_W - 135, f.x));
     }
@@ -897,9 +1153,9 @@ function render() {
   } else if (game.screen === 'vs') {
     drawVsScreen(ctx, game);
   } else {
-    drawArena(ctx, game.arena, game.tick);
-    drawFighter(ctx, game.fighters[0], game.tick);
-    drawFighter(ctx, game.fighters[1], game.tick + 15);
+    drawArena(ctx, game.arena, game.animTick);
+    drawFighter(ctx, game.fighters[0], game.animTick);
+    drawFighter(ctx, game.fighters[1], game.animTick + 15);
     drawSpecialFX(ctx, game.specialFx, game.fighters);
     drawEffects(ctx, game.particles, game.floatingTexts);
 
@@ -915,8 +1171,31 @@ function render() {
   ctx.restore();
 }
 
-function gameLoop() {
-  stepPhysics();
+let lastLoopTs = 0;
+let frameAccMs = 0;
+function gameLoop(now = 0) {
+  if (!lastLoopTs) {
+    lastLoopTs = now;
+    stepPhysics();
+  } else {
+    const dt = Math.min(45, Math.max(0, now - lastLoopTs));
+    lastLoopTs = now;
+    if (dt >= 13 && dt <= 24) {
+      // Écran 60 Hz standard : 1 pas fluide sans dérive ni saut d'image
+      stepPhysics();
+      frameAccMs = 0;
+    } else {
+      // Écran ProMotion 120 Hz+ ou perte de focus : plafonné strictement à 60 ticks/sec !
+      frameAccMs += dt;
+      let steps = 0;
+      while (frameAccMs >= 16.6667 && steps < 2) {
+        stepPhysics();
+        frameAccMs -= 16.6667;
+        steps++;
+      }
+      if (steps >= 2) frameAccMs = 0;
+    }
+  }
   render();
   requestAnimationFrame(gameLoop);
 }
@@ -1131,13 +1410,17 @@ window.addEventListener('keydown', e => {
 
   if (game.screen !== 'fight') return;
 
-  // Touches de Combat SF2 : Poing (F/R) · Pied/Balayette (G/H) · Parade (C/MajG) · Saut (Espace) · Spécial (Entrée)
+  // Touches de Combat SF2 : Poing (F / S+F bas) · Shoryuken (R) · Pied (G / S+G balayette) · Spin Kick (H) · Boule (E) · Parade (C) · Spécial (Entrée)
   if (e.code === 'KeyF') {
     triggerAttack(0, 'light');
   } else if (e.code === 'KeyR') {
-    triggerAttack(0, 'heavy');
-  } else if (e.code === 'KeyG' || e.code === 'KeyH') {
+    triggerAttack(0, 'shoryuken');
+  } else if (e.code === 'KeyG') {
     triggerAttack(0, 'kick');
+  } else if (e.code === 'KeyH') {
+    triggerAttack(0, 'spinkick');
+  } else if (e.code === 'KeyE') {
+    triggerAttack(0, 'headbutt');
   } else if (e.code === 'KeyC' || e.code === 'ShiftLeft') {
     triggerAttack(0, 'parry');
   } else if (e.code === 'Enter' || (game.mode === 'bot' && e.code === 'NumpadEnter')) {
@@ -1147,7 +1430,10 @@ window.addEventListener('keydown', e => {
 
   if (game.mode === 'local') {
     if (e.code === 'KeyK') triggerAttack(1, 'light');
+    else if (e.code === 'KeyI') triggerAttack(1, 'shoryuken');
     else if (e.code === 'KeyL') triggerAttack(1, 'kick');
+    else if (e.code === 'KeyP') triggerAttack(1, 'spinkick');
+    else if (e.code === 'KeyU') triggerAttack(1, 'headbutt');
     else if (e.code === 'KeyM' || e.code === 'KeyJ') triggerAttack(1, 'parry');
     else if (e.code === 'KeyO' || e.code === 'ShiftRight' || e.code === 'NumpadEnter') {
       e.preventDefault();

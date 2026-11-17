@@ -405,6 +405,27 @@ export class SoundEngine {
     this._tone({ freq: 130, endFreq: 40, type: 'sine', duration: 0.22, gain: 0.15, delay: 0.03 });
   }
 
+  playHeadbutt() {
+    this._tone({ freq: 145, endFreq: 45, type: 'sawtooth', duration: 0.16, gain: 0.18 });
+    this._tone({ freq: 310, endFreq: 95, type: 'triangle', duration: 0.12, gain: 0.14, delay: 0.01 });
+  }
+
+  playShoryuken() {
+    this._tone({ freq: 240, endFreq: 920, type: 'sawtooth', duration: 0.24, gain: 0.14 });
+    this._tone({ freq: 440, endFreq: 1180, type: 'triangle', duration: 0.22, gain: 0.12, delay: 0.03 });
+  }
+
+  playSpinKick() {
+    this._tone({ freq: 520, endFreq: 260, type: 'triangle', duration: 0.10, gain: 0.11, delay: 0 });
+    this._tone({ freq: 580, endFreq: 290, type: 'triangle', duration: 0.10, gain: 0.11, delay: 0.11 });
+    this._tone({ freq: 640, endFreq: 310, type: 'triangle', duration: 0.10, gain: 0.10, delay: 0.22 });
+  }
+
+  playGuardCrush() {
+    this._tone({ freq: 220, endFreq: 55, type: 'sawtooth', duration: 0.22, gain: 0.18 });
+    this._tone({ freq: 620, endFreq: 180, type: 'square', duration: 0.14, gain: 0.10, delay: 0.02 });
+  }
+
   playCrouch() {
     this._tone({ freq: 210, endFreq: 135, type: 'sine', duration: 0.055, gain: 0.045 });
   }

@@ -49,9 +49,12 @@ Jeu de combat 2D **16-bit Néo-Arcade** jouable directement dans le navigateur (
 | --- | --- | --- |
 | Déplacer | `Q` / `A` et `D` (ou `←`/`→` en Solo) | `←` et `→` |
 | **Sauter** | `Espace` (ou `Z`/`W`) | `↑` |
-| **Se baisser** | `S` (garde si recul + attaque ennemie) | `↓` |
-| **Coup de Poing (léger / fort)** | `F` / `R` | `K` |
-| **Coup de Pied / Balayette** | `G` (ou `H`) · `S + G` Balayette | `L` · `↓ + L` Balayette |
+| **Se baisser** | `S` (esquive les jabs hauts, garde basse) | `↓` |
+| **Coup de Poing (debout / baissé)** | `F` / `S + F` | `K` / `↓ + K` |
+| **Shoryuken (Uppercut sauté)** | `R` | `I` |
+| **Coup de Pied / Balayette basse** | `G` / `S + G` | `L` / `↓ + L` |
+| **Spinning Kick (Vrille aérienne)** | `H` | `P` |
+| **Coup de Boule (Brise-garde !)** | `E` | `U` |
 | **Parade (Parry / Parade Parfaite)** | `C` ou `Maj Gauche` | `M` ou `J` |
 | **Coup Spécial** | `Entrée` | `Maj Droite`, `O` ou `Entrée Num.` |
 | **Mode Veille (Attract Mode)** | `V` (sur Menu / Sélection) ou automatique après 10s | — |

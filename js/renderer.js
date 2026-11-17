@@ -25,11 +25,21 @@ FIGHTER_ORDER.forEach(id => {
     idle: loadImage(`assets/fighters/${id}_idle.png`),
     idle2: loadImage(`assets/fighters/${id}_idle2.png`),
     walk: loadImage(`assets/fighters/${id}_walk.png`),
+    walk2: loadImage(`assets/fighters/${id}_walk2.png`),
     crouch: loadImage(`assets/fighters/${id}_crouch.png`),
+    crouch_punch: loadImage(`assets/fighters/${id}_crouch_punch.png`),
     jump: loadImage(`assets/fighters/${id}_jump.png`),
-    attack: loadImage(`assets/fighters/${id}_attack.png`),
+    punch1: loadImage(`assets/fighters/${id}_punch1.png`),
+    punch: loadImage(`assets/fighters/${id}_punch.png`),
+    kick1: loadImage(`assets/fighters/${id}_kick1.png`),
     kick: loadImage(`assets/fighters/${id}_kick.png`),
+    sweep: loadImage(`assets/fighters/${id}_sweep.png`),
+    headbutt: loadImage(`assets/fighters/${id}_headbutt.png`),
+    shoryuken: loadImage(`assets/fighters/${id}_shoryuken.png`),
+    spinkick: loadImage(`assets/fighters/${id}_spinkick.png`),
     parry: loadImage(`assets/fighters/${id}_parry.png`),
+    hit: loadImage(`assets/fighters/${id}_hit.png`),
+    attack: loadImage(`assets/fighters/${id}_attack.png`),
     portrait: loadImage(`assets/fighters/${id}_portrait.png`)
   };
 });
@@ -38,7 +48,8 @@ ASSETS.fighters.goldohrack.special = loadImage('assets/fighters/goldohrack_speci
 ASSETS.fighters.darkmada.special = loadImage('assets/fighters/darkmada_special.png');
 ASSETS.extras = {
   goldohrackFist: loadImage('assets/fighters/goldohrack_fist.png'),
-  sushiSolo: loadImage('assets/fighters/sushi_solo.png')
+  sushiSolo: loadImage('assets/fighters/sushi_solo.png'),
+  sushiIdle: loadImage('assets/fighters/sushi_idle.png')
 };
 
 ASSETS.ui.titleScreen = loadImage('assets/ui/title_screen.png');
@@ -229,44 +240,98 @@ export function drawArena(ctx, arenaId, t) {
  * Dessine un combattant entier à l'échelle exacte 1:1 (multiples de 3px),
  * sans aucun découpage horizontal aux genoux ni au torse.
  */
+function readyImg(im) {
+  return im && im.complete && im.naturalWidth > 0 ? im : null;
+}
+
 export function drawFighter(ctx, f, t) {
+  const def = FIGHTERS[f.id];
   const pack = ASSETS.fighters[f.id];
-  if (!pack || !pack.idle.complete || pack.idle.naturalWidth === 0) return;
+  if (!pack || !readyImg(pack.idle)) return;
 
-  const isAtkPunch = f.state === 'light' || f.state === 'heavy' || f.state === 'jump_punch';
-  const isAtkKick = f.state === 'kick' || f.state === 'sweep' || f.state === 'jump_kick';
-  const isGuarding = f.state === 'block' || f.state === 'parry';
-  const isJumping = f.y < FLOOR_Y - 2 || f.state === 'jump' || f.state === 'jump_punch' || f.state === 'jump_kick';
+  const isJumping = f.y < FLOOR_Y - 2 || f.state === 'jump' || f.state === 'jump_punch' || f.state === 'jump_kick' || f.state === 'spinkick' || f.state === 'shoryuken';
 
+  // Sélection cinématique multi-images façon Street Fighter II (windup -> peak -> retour par ratio 0..1)
+  const p = f.stateDuration > 0 ? Math.max(0, Math.min(1, 1 - f.stateTimer / f.stateDuration)) : 0;
   let sprite = pack.idle;
+  let spinFlip = 1;
+
   if (f.state === 'special') {
-    if ((f.id === 'koll' || f.id === 'goldohrack' || f.id === 'darkmada') && pack.special && pack.special.complete && pack.special.naturalWidth > 0) {
-      sprite = pack.special;
-    } else if (pack.attack && pack.attack.complete && pack.attack.naturalWidth > 0) {
-      sprite = pack.attack;
-    }
-  } else if (isAtkKick && pack.kick && pack.kick.complete && pack.kick.naturalWidth > 0) {
-    sprite = pack.kick;
-  } else if (isAtkPunch && pack.attack && pack.attack.complete && pack.attack.naturalWidth > 0) {
-    sprite = pack.attack;
-  } else if (isGuarding && pack.parry && pack.parry.complete && pack.parry.naturalWidth > 0) {
-    sprite = pack.parry;
-  } else if (f.state === 'crouch' && pack.crouch && pack.crouch.complete && pack.crouch.naturalWidth > 0) {
-    sprite = pack.crouch;
-  } else if (isJumping && pack.jump && pack.jump.complete && pack.jump.naturalWidth > 0) {
-    sprite = pack.jump;
-  } else if (f.state === 'walk' && pack.walk && pack.walk.complete && pack.walk.naturalWidth > 0) {
-    sprite = Math.floor(t / 7) % 2 === 0 ? pack.walk : pack.idle;
-  } else if (pack.idle2 && pack.idle2.complete && pack.idle2.naturalWidth > 0) {
-    sprite = Math.floor(t / 15) % 2 === 0 ? pack.idle : pack.idle2;
+    sprite = readyImg(pack.special) || readyImg(pack.attack) || pack.idle;
+  } else if (f.state === 'shoryuken') {
+    sprite = readyImg(pack.shoryuken) || readyImg(pack.attack) || pack.idle;
+  } else if (f.state === 'spinkick') {
+    sprite = readyImg(pack.spinkick) || readyImg(pack.kick) || pack.idle;
+    spinFlip = Math.floor(p * 8) % 2 === 0 ? 1 : -1;
+  } else if (f.state === 'headbutt') {
+    sprite = p < 0.28 ? (readyImg(pack.crouch) || pack.idle) : (readyImg(pack.headbutt) || pack.idle);
+  } else if (f.state === 'crouch_punch') {
+    sprite = (p >= 0.16 && p <= 0.78)
+      ? (readyImg(pack.crouch_punch) || readyImg(pack.crouch) || pack.idle)
+      : (readyImg(pack.crouch) || pack.idle);
+  } else if (f.state === 'sweep') {
+    sprite = (p >= 0.22 && p <= 0.78)
+      ? (readyImg(pack.sweep) || readyImg(pack.kick) || pack.idle)
+      : (readyImg(pack.crouch) || pack.idle);
+  } else if (f.state === 'kick' || f.state === 'jump_kick') {
+    // 3 temps SF2 : appel du genou (kick1) -> coup de pied haut (kick) -> retour (kick1)
+    const activePhase = f.state === 'jump_kick' ? (p >= 0.12 && p <= 0.82) : (p >= 0.24 && p <= 0.68);
+    sprite = activePhase ? (readyImg(pack.kick) || pack.idle) : (readyImg(pack.kick1) || readyImg(pack.kick) || pack.idle);
+  } else if (f.state === 'light' || f.state === 'jump_punch') {
+    const activePhase = f.state === 'jump_punch' ? (p >= 0.14 && p <= 0.80) : (p >= 0.18 && p <= 0.68);
+    sprite = activePhase ? (readyImg(pack.punch) || readyImg(pack.attack) || pack.idle) : (readyImg(pack.punch1) || readyImg(pack.punch) || pack.idle);
+  } else if (f.state === 'heavy') {
+    sprite = p < 0.25 ? (readyImg(pack.punch1) || pack.idle) : (readyImg(pack.punch) || readyImg(pack.attack) || pack.idle);
+  } else if (f.state === 'hit' || f.state === 'down' || f.state === 'ko') {
+    sprite = readyImg(pack.hit) || pack.idle;
+  } else if (f.state === 'block' || f.state === 'parry') {
+    sprite = readyImg(pack.parry) || pack.idle;
+  } else if (f.state === 'crouch') {
+    sprite = readyImg(pack.crouch) || pack.idle;
+  } else if (isJumping) {
+    sprite = readyImg(pack.jump) || pack.idle;
+  } else if (f.state === 'walk') {
+    // Vraie boucle 4 temps : pas avant -> passage -> pas opposé -> passage
+    const step = Math.floor(t / 6) % 4;
+    const baseIdle = f.id === 'darkmada' ? (readyImg(pack.special) || pack.idle) : pack.idle;
+    sprite = step === 0 ? (readyImg(pack.walk) || baseIdle) : step === 2 ? (readyImg(pack.walk2) || baseIdle) : baseIdle;
+  } else {
+    const baseIdle = f.id === 'darkmada' && readyImg(ASSETS.extras?.sushiIdle) ? (readyImg(pack.special) || pack.idle) : pack.idle;
+    const step = Math.floor(t / 14) % 2;
+    sprite = step === 0 ? baseIdle : (readyImg(pack.idle2) || baseIdle);
   }
 
-  const idleW = pack.idle.width;
+  // Référence largeur stable pour centrage (dog-free pour DarkMada afin qu'il reste parfaitement ancré)
+  const refSprite = (f.id === 'darkmada' && readyImg(pack.special)) ? pack.special : pack.idle;
+  const idleW = refSprite.width;
   const drawW = sprite.width;
   const drawH = sprite.height;
 
   ctx.save();
   ctx.imageSmoothingEnabled = false;
+
+  // Compagnon SUSHI animé indépendamment au sol aux côtés de DarkMada (sauf quand il part seul en Spécial)
+  const sushiImg = f.id === 'darkmada' && f.state !== 'special' && readyImg(ASSETS.extras?.sushiIdle);
+  if (sushiImg) {
+    ctx.save();
+    ctx.translate(Math.round(f.x + f.facing * 62), FLOOR_Y);
+    ctx.scale(f.facing, 1);
+    let sy = 0;
+    let sxScale = 1;
+    let syScale = 1;
+    if (f.state === 'walk') sy = -Math.round(Math.abs(Math.sin(t * 0.36)) * 4) * 2;
+    else if (f.state === 'crouch' || f.state === 'crouch_punch' || f.state === 'sweep') syScale = 0.78;
+    else if (f.state === 'light' || f.state === 'heavy' || f.state === 'headbutt' || f.state === 'kick') sy = -Math.round(Math.abs(Math.sin(t * 0.45)) * 6);
+    else sy = -Math.round(Math.max(0, Math.sin(t * 0.14)) * 2);
+
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.36)';
+    ctx.fillRect(-Math.round(sushiImg.width * 0.44), -5, Math.round(sushiImg.width * 0.88), 8);
+    const swDog = Math.round(sushiImg.width * sxScale);
+    const shDog = Math.round(sushiImg.height * syScale);
+    ctx.drawImage(sushiImg, -Math.round(swDog * 0.5), -shDog + sy, swDog, shDog);
+    ctx.restore();
+  }
+
   ctx.translate(Math.round(f.x), Math.round(f.y));
 
   // Ombre pixelisée ancrée au sol
@@ -277,41 +342,34 @@ export function drawFighter(ctx, f, t) {
   ctx.fillRect(-Math.round(sw / 2), groundOffset - 6, sw, 9);
   ctx.fillRect(-Math.round(sw * 0.36), groundOffset - 12, Math.round(sw * 0.72), 15);
 
-  ctx.scale(f.facing, 1);
+  ctx.scale(f.facing * spinFlip, 1);
 
   if (f.state === 'ko' || f.state === 'down') {
     ctx.translate(0, -24);
     ctx.rotate(-Math.PI / 2);
-  } else if (f.state === 'sweep') {
-    ctx.translate(0, -18);
-    ctx.rotate(0.18);
   } else if (isJumping && Math.abs(f.vx) > 2 && f.state === 'jump') {
     ctx.translate(0, -drawH * 0.45);
-    ctx.rotate((f.vx * f.facing > 0 ? 1 : -1) * 0.08);
+    ctx.rotate((f.vx * f.facing > 0 ? 1 : -1) * 0.12);
     ctx.translate(0, drawH * 0.45);
   }
 
-  // Rebond global monobloc entier sur grille de 3px (zéro déchirement)
   let bobY = 0;
   if (f.state === 'walk') {
     bobY = -Math.round(Math.abs(Math.sin(t * 0.28)) * 2) * 3;
   } else if (f.state === 'idle' && sprite === pack.idle) {
     bobY = Math.round(Math.sin(t * 0.14)) * 3;
-  } else if (f.state === 'crouch' && sprite === pack.idle) {
-    bobY = 30;
-  } else if (f.state === 'sweep') {
-    bobY = 54;
   }
 
   const anchorX = Math.round(-idleW * 0.44);
   const drawY = -drawH + bobY;
 
-  if (f.state === 'special') {
+  // Traînée fantôme arcade sur Shoryuken, Spinning Kick, Coup de boule et Spécial
+  if (f.state === 'special' || f.state === 'shoryuken' || f.state === 'spinkick' || f.state === 'headbutt') {
     ctx.save();
-    ctx.globalAlpha = 0.32;
-    ctx.drawImage(sprite, anchorX - 24, drawY - 3, drawW, drawH);
-    ctx.globalAlpha = 0.18;
-    ctx.drawImage(sprite, anchorX - 45, drawY - 6, drawW, drawH);
+    ctx.globalAlpha = 0.30;
+    ctx.drawImage(sprite, anchorX - 18, drawY + (f.state === 'shoryuken' ? 18 : 0), drawW, drawH);
+    ctx.globalAlpha = 0.15;
+    ctx.drawImage(sprite, anchorX - 36, drawY + (f.state === 'shoryuken' ? 36 : 0), drawW, drawH);
     ctx.restore();
   }
 
@@ -321,13 +379,35 @@ export function drawFighter(ctx, f, t) {
   ctx.drawImage(sprite, anchorX, drawY, drawW, drawH);
   ctx.globalAlpha = 1;
 
-  // Arc d'impact visuel sur les coups de pied, balayettes et parades
-  if (f.state === 'sweep' && f.stateTimer > 8) {
+  // Effets visuels d'arts martiaux (Shoryuken, Spinning Kick, Coup de boule, Balayette, Parade)
+  if (f.state === 'shoryuken') {
+    ctx.fillStyle = def ? def.accent : '#fde047';
+    ctx.fillRect(Math.round(drawW * 0.25), -drawH - 18, 22, 34);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(Math.round(drawW * 0.28), -drawH - 12, 12, 22);
+  } else if (f.state === 'spinkick') {
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.ellipse(0, -Math.round(drawH * 0.45), Math.round(drawW * 0.56), 18, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = '#fef08a';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.ellipse(0, -Math.round(drawH * 0.55), Math.round(drawW * 0.46), 12, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.lineWidth = 1;
+  } else if (f.state === 'headbutt' && p >= 0.30 && p <= 0.80) {
+    ctx.fillStyle = 'rgba(249, 115, 22, 0.72)';
+    ctx.fillRect(Math.round(drawW * 0.36), -Math.round(drawH * 0.80), 22, 32);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(Math.round(drawW * 0.40), -Math.round(drawH * 0.76), 12, 22);
+  } else if (f.state === 'sweep' && p >= 0.22 && p <= 0.78) {
     ctx.fillStyle = '#fde047';
     ctx.fillRect(Math.round(idleW * 0.25), -24, 96, 8);
     ctx.fillStyle = '#38bdf8';
     ctx.fillRect(Math.round(idleW * 0.35), -14, 72, 6);
-  } else if ((f.state === 'kick' || f.state === 'jump_kick') && f.stateTimer > 6) {
+  } else if ((f.state === 'kick' || f.state === 'jump_kick') && p >= 0.24 && p <= 0.68) {
     ctx.fillStyle = 'rgba(250, 204, 21, 0.72)';
     ctx.fillRect(Math.round(drawW * 0.42), -Math.round(drawH * 0.56), 24, 14);
     ctx.fillStyle = '#ffffff';
@@ -335,7 +415,7 @@ export function drawFighter(ctx, f, t) {
   } else if (f.state === 'parry') {
     const px = Math.round(idleW * 0.34);
     const py = -Math.round(drawH * 0.54);
-    const pulse = 36 + (t % 6) * 4;
+    const pulse = 36 + (Math.floor(t) % 6) * 4;
     ctx.strokeStyle = f.parryWindow > 0 ? '#fde047' : '#38bdf8';
     ctx.lineWidth = 4;
     ctx.beginPath();

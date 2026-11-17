@@ -196,213 +196,412 @@ def pixelize_sprite(crop_img, target_retro_h=110, scale_factor=3):
     return quantize_and_upscale(small_rgba, scale_factor=scale_factor)
 
 
-def _sigmoid(val):
-    return 0.5 * (1.0 + math.tanh(val))
+# Proportions anatomiques (coordonnées normalisées sur la base 1x rétro h=110px)
+# Permet d'extraire tête, buste, bras avant/arrière, cuisses et tibias sans découper l'arme ou la cape
+FIGHTER_RIGS = {
+    "darkmada":   {"neck": 0.25, "waist": 0.53, "knee": 0.76, "hx": 0.48, "hip_x": 0.52, "sh_x": 0.54, "sh_y": 0.28, "arm_y1": 0.20, "arm_y2": 0.48, "leg_max_x": 0.98},
+    "goldohrack": {"neck": 0.26, "waist": 0.52, "knee": 0.73, "hx": 0.49, "hip_x": 0.50, "sh_x": 0.61, "sh_y": 0.30, "arm_y1": 0.22, "arm_y2": 0.52, "leg_max_x": 0.98},
+    "m3g4":       {"neck": 0.25, "waist": 0.52, "knee": 0.75, "hx": 0.47, "hip_x": 0.47, "sh_x": 0.58, "sh_y": 0.32, "arm_y1": 0.25, "arm_y2": 0.60, "leg_max_x": 0.98},
+    "koll":       {"neck": 0.26, "waist": 0.52, "knee": 0.75, "hx": 0.50, "hip_x": 0.51, "sh_x": 0.57, "sh_y": 0.30, "arm_y1": 0.22, "arm_y2": 0.52, "leg_max_x": 0.98},
+    "madchat":    {"neck": 0.26, "waist": 0.56, "knee": 0.78, "hx": 0.36, "hip_x": 0.34, "sh_x": 0.42, "sh_y": 0.36, "arm_y1": 0.00, "arm_y2": 0.70, "leg_max_x": 0.68, "head_max_x": 0.50},
+    "lurck":      {"neck": 0.27, "waist": 0.60, "knee": 0.79, "hx": 0.52, "hip_x": 0.51, "sh_x": 0.65, "sh_y": 0.34, "arm_y1": 0.24, "arm_y2": 0.60, "leg_max_x": 0.86, "leg_min_x": 0.14},
+}
 
 
-def generate_deformed_pose(crop_img, pose, target_retro_h=110, scale_factor=3, fighter_id=""):
-    """
-    Génère les poses SF2 propres et lisibles sans aucune duplication de membre :
-    - idle2, walk, crouch, jump, parry : déformation C-infini bijective
-    - kick : inclinaison arrière du buste + rotation propre de la jambe avant (2 jambes exactes !)
-    """
-    bbox = crop_img.getbbox()
+def _to_retro_base(sprite_3x_or_crop, target_retro_h=110):
+    bbox = sprite_3x_or_crop.getbbox()
     if not bbox:
         return None
-    trimmed = crop_img.crop(bbox).convert("RGBA")
-    sw, sh = trimmed.size
+    tr = sprite_3x_or_crop.crop(bbox).convert("RGBA")
+    sw, sh = tr.size
     if sw <= 0 or sh <= 0:
         return None
+    rw = max(16, round(sw * (target_retro_h / sh)))
+    rgb = tr.convert("RGB").resize((rw, target_retro_h), Image.Resampling.BILINEAR)
+    alp = tr.split()[3].resize((rw, target_retro_h), Image.Resampling.NEAREST)
+    base = rgb.convert("RGBA")
+    base.putalpha(alp)
+    px = base.load()
+    for y in range(target_retro_h):
+        for x in range(rw):
+            px[x, y] = (px[x, y][0], px[x, y][1], px[x, y][2], 255 if px[x, y][3] >= 128 else 0)
+    return base
 
-    # Mode KICK : séparation propre jambe d'appui / jambe qui frappe -> zéro 3e jambe !
-    if pose == "kick":
-        rw0 = max(16, round(sw * (target_retro_h / sh)))
-        rgb_s = trimmed.convert("RGB").resize((rw0, target_retro_h), Image.Resampling.BILINEAR)
-        alp_s = trimmed.split()[3].resize((rw0, target_retro_h), Image.Resampling.NEAREST)
-        base = rgb_s.convert("RGBA")
-        base.putalpha(alp_s)
-        bpx = base.load()
-        for yy in range(target_retro_h):
-            for xx in range(rw0):
-                if bpx[xx, yy][3] < 128:
-                    bpx[xx, yy] = (0, 0, 0, 0)
-                else:
-                    bpx[xx, yy] = (bpx[xx, yy][0], bpx[xx, yy][1], bpx[xx, yy][2], 255)
 
-        # Pour Madchat (épée) / Lurck (aile), restreint strictement la zone jambe avant aux jambes
-        hip_x = int(rw0 * (0.48 if fighter_id != "madchat" else 0.40))
-        hip_y = int(target_retro_h * 0.56)
-        max_leg_x = int(rw0 * (0.68 if fighter_id in ("madchat", "lurck") else 0.96))
+def _paint_joint_disk(img, cx, cy, r, sample_img=None):
+    """Comble un petit disque d'articulation avec la couleur moyenne locale pour éviter tout trou aux pliures."""
+    w, h = img.size
+    px = img.load()
+    src_px = (sample_img or img).load()
+    cols = []
+    for sy in range(max(0, cy - r - 2), min(h, cy + r + 3)):
+        for sx in range(max(0, cx - r - 2), min(w, cx + r + 3)):
+            if src_px[sx, sy][3] > 0:
+                cols.append(src_px[sx, sy][:3])
+    if not cols:
+        return
+    avg = (
+        sum(c[0] for c in cols) // len(cols),
+        sum(c[1] for c in cols) // len(cols),
+        sum(c[2] for c in cols) // len(cols),
+        255,
+    )
+    for yy in range(max(0, cy - r), min(h, cy + r + 1)):
+        for xx in range(max(0, cx - r), min(w, cx + r + 1)):
+            if (xx - cx) ** 2 + (yy - cy) ** 2 <= r * r and px[xx, yy][3] == 0:
+                px[xx, yy] = avg
 
-        body = base.copy()
-        leg = Image.new("RGBA", (rw0, target_retro_h), (0, 0, 0, 0))
-        body_px = body.load()
-        leg_px = leg.load()
 
-        for yy in range(hip_y + 2, target_retro_h):
-            # Pente douce pour séparer la jambe avant sans couper la jambe d'appui arrière
-            split_col = int(hip_x + (yy - hip_y) * 0.08)
-            for xx in range(split_col, max_leg_x):
-                c = body_px[xx, yy]
-                if c[3] > 0:
-                    # Ignore pixels dorés du chien si jamais présents
-                    if fighter_id == "darkmada" and c[0] > 125 and c[0] - c[2] > 32:
-                        continue
-                    leg_px[xx, yy] = c
-                    body_px[xx, yy] = (0, 0, 0, 0)
+def _segment_fighter(base, fighter_id):
+    """Découpe un sprite rétro (rw x 110) en 8 segments articulés avec chevauchement propre aux joints."""
+    rw, rh = base.size
+    cfg = FIGHTER_RIGS.get(fighter_id, FIGHTER_RIGS["koll"])
+    bpx = base.load()
 
-        # Incline le corps en arrière (-14 deg) et fait pivoter la jambe avant (+66 deg) vers l'avant !
-        cw = rw0 + 96
-        ch = target_retro_h + 44
-        ox, oy = 42, 26
-        pivot = (ox + hip_x, oy + hip_y)
+    neck_y = round(rh * cfg["neck"])
+    waist_y = round(rh * cfg["waist"])
+    knee_y = round(rh * cfg["knee"])
+    hip_x = round(rw * cfg["hip_x"])
+    sh_x = round(rw * cfg["sh_x"])
+    sh_y = round(rh * cfg["sh_y"])
+    hx = round(rw * cfg["hx"])
+    leg_min_x = round(rw * cfg.get("leg_min_x", 0.0))
+    leg_max_x = round(rw * cfg.get("leg_max_x", 0.98))
+    head_max_x = round(rw * cfg.get("head_max_x", 0.98))
+    arm_y1 = round(rh * cfg["arm_y1"])
+    arm_y2 = round(rh * cfg["arm_y2"])
 
-        body_pad = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
-        body_pad.paste(body, (ox, oy), body)
-        body_rot = body_pad.rotate(-14, resample=Image.Resampling.BICUBIC, center=pivot)
+    def blank():
+        return Image.new("RGBA", (rw, rh), (0, 0, 0, 0))
 
-        leg_pad = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
-        leg_pad.paste(leg, (ox, oy), leg)
-        # Remonte la jambe avant horizontalement/en coup de pied haut
-        leg_rot = leg_pad.rotate(66, resample=Image.Resampling.BICUBIC, center=pivot)
+    head = blank()
+    torso = blank()
+    arm_f = blank()
+    arm_b = blank()
+    thigh_f = blank()
+    shin_f = blank()
+    thigh_b = blank()
+    shin_b = blank()
 
-        # Légère translation du pied vers l'avant (+5px) pour bien allonger l'extension
-        leg_shift = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
-        leg_shift.paste(leg_rot, (5, -4), leg_rot)
+    hp, tp, afp, abp = head.load(), torso.load(), arm_f.load(), arm_b.load()
+    tfp, sfp, tbp, sbp = thigh_f.load(), shin_f.load(), thigh_b.load(), shin_b.load()
 
-        combined = Image.alpha_composite(body_rot, leg_shift)
-        # Ajoute une petite traînée d'impact blanche/dorée au bout du pied
-        cdraw = ImageDraw.Draw(combined)
-        lb = leg_shift.getbbox()
-        if lb:
-            fx = lb[2] - 2
-            fy = (lb[1] + lb[3]) // 2
-            cdraw.arc((fx - 14, fy - 12, fx + 6, fy + 10), -70, 55, fill=(254, 240, 138, 220), width=2)
-
-        cb = combined.getbbox()
-        if not cb:
-            return None
-        return quantize_and_upscale(combined.crop(cb), scale_factor=scale_factor)
-
-    base_rw = max(16, round(sw * (target_retro_h / sh)))
-    pad_x = int(base_rw * 0.36)
-    pad_top = int(target_retro_h * 0.12)
-    pad_bot = int(target_retro_h * 0.08)
-
-    if pose == "crouch":
-        out_rh = round(target_retro_h * 0.70) + pad_top
-    elif pose == "jump":
-        out_rh = round(target_retro_h * 0.85) + pad_top
-    else:
-        out_rh = target_retro_h + pad_top + pad_bot
-    out_rw = base_rw + pad_x * 2
-
-    src_px = trimmed.load()
-    dst = Image.new("RGBA", (out_rw, out_rh), (0, 0, 0, 0))
-    dpx = dst.load()
-
-    def sample_src(u, v):
-        if u < 0.0 or u >= 1.0 or v < 0.0 or v >= 1.0:
-            return (0, 0, 0, 0)
-        fx = u * (sw - 1)
-        fy = v * (sh - 1)
-        x0 = int(fx)
-        y0 = int(fy)
-        x1 = min(sw - 1, x0 + 1)
-        y1 = min(sh - 1, y0 + 1)
-        tx = fx - x0
-        ty = fy - y0
-
-        c00 = src_px[x0, y0]
-        c10 = src_px[x1, y0]
-        c01 = src_px[x0, y1]
-        c11 = src_px[x1, y1]
-
-        a0 = c00[3] * (1 - tx) + c10[3] * tx
-        a1 = c01[3] * (1 - tx) + c11[3] * tx
-        a = a0 * (1 - ty) + a1 * ty
-        if a < 110:
-            return (0, 0, 0, 0)
-
-        res = [0, 0, 0, 255]
-        w_sum = 0.0
-        for cx, cy, w in ((x0, y0, (1 - tx) * (1 - ty)), (x1, y0, tx * (1 - ty)), (x0, y1, (1 - tx) * ty), (x1, y1, tx * ty)):
-            p = src_px[cx, cy]
-            if p[3] > 20:
-                res[0] += p[0] * w
-                res[1] += p[1] * w
-                res[2] += p[2] * w
-                w_sum += w
-        if w_sum <= 1e-5:
-            return (0, 0, 0, 0)
-        return (int(res[0] / w_sum), int(res[1] / w_sum), int(res[2] / w_sum), 255)
-
-    y_base = out_rh - (2 if pose in ("crouch", "jump") else pad_bot)
-    char_h = round(target_retro_h * (0.70 if pose == "crouch" else 0.85 if pose == "jump" else 1.0))
-
-    for py in range(out_rh):
-        v_dst = 1.0 - (y_base - py) / float(char_h)
-        for px in range(out_rw):
-            u_dst = (px - pad_x) / float(base_rw)
-
-            u_src, v_src = u_dst, v_dst
-
-            if pose == "idle2":
-                breath = math.sin(max(0.0, min(1.0, v_dst)) * math.pi)
-                v_src = v_dst - 0.032 * breath
-                u_src = 0.50 + (u_dst - 0.50) / (1.0 + 0.045 * breath)
-
-            elif pose == "walk":
-                lean = 0.055 * (1.0 - max(0.0, min(1.0, v_dst)))
-                leg_mask = _sigmoid((v_dst - 0.52) / 0.08)
-                stride = 0.095 * math.tanh((u_dst - 0.48) / 0.16)
-                u_src = u_dst - lean - leg_mask * stride
-                v_src = v_dst + 0.025 * leg_mask * abs(u_dst - 0.48)
-
-            elif pose == "crouch":
-                if v_dst < 0.0 or v_dst > 1.04:
+    # Tête (inclut recouvrement du cou de +5px)
+    for y in range(0, min(rh, neck_y + 5)):
+        for x in range(0, min(rw, head_max_x)):
+            c = bpx[x, y]
+            if c[3] > 0:
+                if fighter_id == "madchat" and x > rw * 0.42 and abs(c[0] - c[1]) < 16 and c[0] > 95:
                     continue
-                if v_dst < 0.45:
-                    v_src = (v_dst / 0.45) * 0.36
-                else:
-                    v_src = 0.36 + ((v_dst - 0.45) / 0.55) * 0.64
-                knee_bulge = math.exp(-((v_dst - 0.58) ** 2) / 0.06)
-                u_src = 0.48 + (u_dst - 0.48) / (1.0 + 0.14 * knee_bulge) - 0.04 * (1.0 - v_dst)
+                hp[x, y] = c
 
-            elif pose == "jump":
-                if v_dst < 0.0 or v_dst > 1.04:
+    # Bras avant (côté droit >= sh_x - 5 pour overlap solide d'épaule ; exclut crinière pour Madchat)
+    arm_f_x0 = max(0, sh_x - 5)
+    for y in range(arm_y1, min(rh, arm_y2 + 3)):
+        for x in range(arm_f_x0, rw):
+            if bpx[x, y][3] > 0:
+                if fighter_id == "madchat" and y < rh * 0.30 and x < rw * 0.58:
                     continue
-                tuck = _sigmoid((v_dst - 0.54) / 0.10)
-                v_src = v_dst * 0.90 + tuck * 0.14
-                u_src = u_dst + 0.075 * (1.0 - v_dst)
+                afp[x, y] = bpx[x, y]
 
-            elif pose == "parry":
-                # Posture défensive ferme, léger recul vers l'arrière
-                lean_back = 0.065 * (1.0 - max(0.0, min(1.0, v_dst)))
-                bracing = math.exp(-((v_dst - 0.60) ** 2) / 0.08)
-                u_src = 0.48 + (u_dst - 0.48) / (1.0 + 0.10 * bracing) + lean_back
-                v_src = v_dst * 0.96
+    # Bras arrière (côté gauche < hx - 6)
+    back_arm_lim = max(4, round(rw * 0.34))
+    for y in range(max(neck_y, sh_y - 6), waist_y + 6):
+        for x in range(0, min(rw, back_arm_lim)):
+            if bpx[x, y][3] > 0:
+                abp[x, y] = bpx[x, y]
 
-            col = sample_src(u_src, v_src)
-            if col[3] > 0:
-                dpx[px, py] = col
+    # Buste central (exclut proprement le bras avant / l'épée de Madchat pour éviter tout doublon)
+    for y in range(max(0, neck_y - 3), min(rh, waist_y + 5)):
+        for x in range(0, rw):
+            c = bpx[x, y]
+            if c[3] == 0:
+                continue
+            if x >= sh_x - 1 and y >= arm_y1 and y <= arm_y2 and not (fighter_id == "lurck" and x < rw * 0.64):
+                continue
+            if fighter_id == "madchat" and x > rw * 0.36 and abs(c[0] - c[1]) < 18 and abs(c[1] - c[2]) < 18 and c[0] > 85:
+                continue
+            if x < back_arm_lim - 5 and fighter_id not in ("madchat", "lurck"):
+                continue
+            tp[x, y] = c
 
-    bbox2 = dst.getbbox()
-    if not bbox2:
-        return None
-    cropped = dst.crop(bbox2)
-    out = quantize_and_upscale(cropped, scale_factor=scale_factor)
+    # Comble les disques d'articulation (cou, épaule, pectoral, bassin) pour zéro fente sous tous les angles
+    _paint_joint_disk(torso, hx, neck_y + 1, 5, base)
+    _paint_joint_disk(head, hx, neck_y + 1, 4, base)
+    _paint_joint_disk(torso, sh_x - 2, sh_y + 3, 7, base)
+    _paint_joint_disk(torso, sh_x + 2, sh_y + 5, 5, base)
+    _paint_joint_disk(torso, hip_x, waist_y, 7, base)
+    _paint_joint_disk(arm_f, sh_x, sh_y + 2, 4, base)
 
-    # Sur la pose PARRY : ajoute un bouclier/reflet défensif pixel-art sur le bras avant
-    if pose == "parry" and out is not None:
-        ow, oh = out.size
-        opx = out.load()
-        gx = int(ow * 0.72) // 3 * 3
-        for gy in range(int(oh * 0.16) // 3 * 3, int(oh * 0.44) // 3 * 3, 3):
-            add_block(opx, ow, oh, gx - 3, gy, (14, 165, 233, 255))
-            add_block(opx, ow, oh, gx, gy, (224, 242, 254, 255))
-            add_block(opx, ow, oh, gx + 3, gy, (56, 189, 248, 255))
+    # Cuisses & Tibias avant/arrière avec rotule arrondie au genou
+    front_kx, front_ky_sum, front_kc = 0, 0, 0
+    back_kx, back_ky_sum, back_kc = 0, 0, 0
+    for y in range(max(0, waist_y - 3), rh):
+        split_col = int(hip_x + (y - waist_y) * 0.08)
+        for x in range(leg_min_x, leg_max_x):
+            c = bpx[x, y]
+            if c[3] == 0:
+                continue
+            is_front = x >= split_col
+            in_thigh = y <= knee_y + 3
+            in_shin = y >= knee_y - 3
+            if is_front:
+                if in_thigh:
+                    tfp[x, y] = c
+                if in_shin:
+                    sfp[x, y] = c
+                if abs(y - knee_y) <= 2:
+                    front_kx += x
+                    front_ky_sum += y
+                    front_kc += 1
+            else:
+                if in_thigh:
+                    tbp[x, y] = c
+                if in_shin:
+                    sbp[x, y] = c
+                if abs(y - knee_y) <= 2:
+                    back_kx += x
+                    back_ky_sum += y
+                    back_kc += 1
+
+    fk = (front_kx // front_kc if front_kc else min(rw - 4, hip_x + 12), knee_y)
+    bk = (back_kx // back_kc if back_kc else max(4, hip_x - 14), knee_y)
+    _paint_joint_disk(thigh_f, fk[0], fk[1], 3, base)
+    _paint_joint_disk(shin_f, fk[0], fk[1], 3, base)
+    _paint_joint_disk(thigh_b, bk[0], bk[1], 3, base)
+    _paint_joint_disk(shin_b, bk[0], bk[1], 3, base)
+
+    return {
+        "rw": rw, "rh": rh,
+        "neck_pt": (hx, neck_y),
+        "waist_pt": (hip_x - 2, waist_y),
+        "sh_f_pt": (sh_x, sh_y + 2),
+        "sh_b_pt": (max(8, back_arm_lim - 4), sh_y + 4),
+        "hip_f_pt": (min(rw - 4, hip_x + 5), waist_y + 2),
+        "hip_b_pt": (max(4, hip_x - 7), waist_y + 2),
+        "knee_f_pt": fk,
+        "knee_b_pt": bk,
+        "head": head, "torso": torso, "arm_f": arm_f, "arm_b": arm_b,
+        "thigh_f": thigh_f, "shin_f": shin_f, "thigh_b": thigh_b, "shin_b": shin_b,
+    }
+
+
+def _place_part(cw, ch, part_img, src_pivot, dst_pivot, angle_deg):
+    """Place et pivote proprement un segment autour de son articulation sur le canevas (cw x ch)."""
+    if not part_img or not part_img.getbbox():
+        return Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+    pw, ph = part_img.size
+    margin = max(pw, ph) + 40
+    tmp = Image.new("RGBA", (pw + margin * 2, ph + margin * 2), (0, 0, 0, 0))
+    tmp.paste(part_img, (margin, margin), part_img)
+    piv = (margin + src_pivot[0], margin + src_pivot[1])
+    rot = tmp.rotate(angle_deg, resample=Image.Resampling.BICUBIC, center=piv)
+    out = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+    dx = round(dst_pivot[0] - piv[0])
+    dy = round(dst_pivot[1] - piv[1])
+    out.paste(rot, (dx, dy), rot)
+    # Binarise l'alpha pour zéro halo gris en pixel-art
+    opx = out.load()
+    for yy in range(ch):
+        for xx in range(cw):
+            r, g, b, a = opx[xx, yy]
+            opx[xx, yy] = (r, g, b, 255) if a >= 128 else (0, 0, 0, 0)
     return out
+
+
+def _rot_pt(vx, vy, angle_deg):
+    rad = math.radians(-angle_deg)  # PIL CCW +deg = horaire négatif en coordonnées Y bas
+    c, s = math.cos(rad), math.sin(rad)
+    return vx * c - vy * s, vx * s + vy * c
+
+
+def generate_articulated_pose(rig, pose, fighter_id="", scale_factor=3):
+    """
+    Assemble le pantin articulé SF2 pour chaque coup/posture :
+    idle2, walk, walk2, crouch, crouch_punch, jump, punch1, punch,
+    kick1, kick, sweep, headbutt, shoryuken, spinkick, parry, hit.
+    """
+    rw, rh = rig["rw"], rig["rh"]
+    cw = rw + 130
+    ch = rh + 90
+    ox = 55
+    oy = 48
+
+    # Paramètres cinématiques par défaut (0 = neutre, angles en degrés PIL: + torso/bras = haut/arrière, + jambes = avant/haut)
+    p = {
+        "body_dx": 0, "body_dy": 0,
+        "torso_a": 0,
+        "head_a": 0, "head_dx": 0, "head_dy": 0,
+        "arm_f_a": 0, "arm_f_dx": 0, "arm_f_dy": 0,
+        "arm_b_a": 0, "arm_b_dx": 0, "arm_b_dy": 0,
+        "thigh_f_a": 0, "shin_f_a": 0,
+        "thigh_b_a": 0, "shin_b_a": 0,
+        "ground_snap": True,
+        "fx": None,
+    }
+
+    if pose == "idle2":
+        p.update(body_dy=3, torso_a=-4, head_a=-2, arm_f_a=5, arm_f_dy=-2, arm_b_a=-4, thigh_f_a=8, shin_f_a=-10, thigh_b_a=-7, shin_b_a=6)
+    elif pose == "walk":
+        p.update(body_dy=-1, torso_a=-8, head_a=-5, arm_f_a=-18, arm_f_dx=3, arm_b_a=18, thigh_f_a=26, shin_f_a=-12, thigh_b_a=-22, shin_b_a=-14)
+    elif pose == "walk2":
+        p.update(body_dy=1, torso_a=-6, head_a=-3, arm_f_a=14, arm_f_dx=-2, arm_b_a=-14, thigh_f_a=-18, shin_f_a=-14, thigh_b_a=24, shin_b_a=-8)
+    elif pose == "crouch":
+        # Vraie flexion des genoux : cuisses écartées + tibias droits verticaux au sol (thigh + shin == 0) !
+        p.update(body_dy=24, torso_a=-12, head_a=-4, arm_f_a=-8, arm_f_dx=2, arm_b_a=-10, thigh_f_a=50, shin_f_a=-50, thigh_b_a=-36, shin_b_a=36)
+    elif pose == "crouch_punch":
+        p.update(body_dy=24, torso_a=-18, head_a=-6, arm_f_a=-18, arm_f_dx=6, arm_f_dy=2, arm_b_a=-24, thigh_f_a=52, shin_f_a=-52, thigh_b_a=-38, shin_b_a=38, fx="punch")
+    elif pose == "jump":
+        # Vrai saut SF2 genoux repliés à la poitrine + bras ouverts
+        p.update(body_dy=-8, torso_a=-10, head_a=-6, arm_f_a=26, arm_f_dy=-2, arm_b_a=24, thigh_f_a=52, shin_f_a=-62, thigh_b_a=28, shin_b_a=-64, ground_snap=False)
+    elif pose == "punch1":
+        # Armement / début de coup de poing
+        p.update(body_dy=2, torso_a=8, head_a=-4, arm_f_a=18, arm_f_dx=-4, arm_f_dy=1, arm_b_a=-12, thigh_f_a=12, shin_f_a=-8, thigh_b_a=-14, shin_b_a=4)
+    elif pose == "punch":
+        # Extension complète du coup de poing avant avec épaule bien soudée au torse !
+        swing_ang = -36 if fighter_id == "madchat" else -16
+        p.update(body_dy=2, torso_a=-15, head_a=-4, arm_f_a=swing_ang, arm_f_dx=5, arm_f_dy=1, arm_b_a=-22, thigh_f_a=18, shin_f_a=-12, thigh_b_a=-18, shin_b_a=-4, fx="punch")
+    elif pose == "kick1":
+        # Appel du genou haut avant extension (style karaté / Chun-Li)
+        p.update(body_dy=0, torso_a=6, head_a=-6, arm_f_a=18, arm_b_a=-14, thigh_f_a=64, shin_f_a=-64, thigh_b_a=-4, shin_b_a=2)
+    elif pose == "kick":
+        # High kick complet jambe tendue + contrepoids du buste
+        p.update(body_dy=-2, torso_a=16, head_a=-10, arm_f_a=22, arm_b_a=-24, thigh_f_a=72, shin_f_a=4, thigh_b_a=-16, shin_b_a=8, fx="kick")
+    elif pose == "sweep":
+        # Balayette basse SF2 : buste incliné bas + jambe avant tendue au ras du sol
+        p.update(body_dy=26, torso_a=24, head_a=-12, arm_f_a=16, arm_b_a=-22, thigh_f_a=82, shin_f_a=2, thigh_b_a=-36, shin_b_a=38, fx="sweep")
+    elif pose == "headbutt":
+        # COUP DE BOULE : plongeon explosif tête la première + bras ramenés à la garde haute/arrière !
+        p.update(body_dy=7, torso_a=-26, head_a=-20, head_dx=5, head_dy=1, arm_f_a=-8, arm_f_dx=-12, arm_f_dy=4, arm_b_a=-36, thigh_f_a=28, shin_f_a=-28, thigh_b_a=-32, shin_b_a=8, fx="headbutt")
+    elif pose == "shoryuken":
+        # SHORYUKEN (Ryu) : genou avant haut levé + uppercut tendu droit vers le ciel !
+        up_ang = 36 if fighter_id == "madchat" else 52
+        p.update(body_dy=-10, torso_a=8, head_a=8, arm_f_a=up_ang, arm_f_dx=1, arm_f_dy=-5, arm_b_a=-16, thigh_f_a=62, shin_f_a=-68, thigh_b_a=-10, shin_b_a=-12, ground_snap=False, fx="shoryuken")
+    elif pose == "spinkick":
+        # SPINNING BIRD / TATSUMAKI KICK (Chun-Li / Ryu) : vrille horizontale en l'air jambes déployées !
+        p.update(body_dy=-8, torso_a=22, head_a=-12, arm_f_a=34, arm_b_a=-36, thigh_f_a=84, shin_f_a=0, thigh_b_a=-68, shin_b_a=6, ground_snap=False, fx="spinkick")
+    elif pose == "parry":
+        # Garde / Parade active SF3 : avant-bras relevé en bouclier
+        p.update(body_dy=2, torso_a=10, head_a=-4, arm_f_a=30, arm_f_dx=-4, arm_f_dy=-5, arm_b_a=16, thigh_f_a=10, shin_f_a=-8, thigh_b_a=-12, shin_b_a=4)
+    elif pose == "hit":
+        # Réaction aux coups : tête & torse projetés en arrière !
+        p.update(body_dy=2, torso_a=18, head_a=24, head_dx=-3, arm_f_a=36, arm_f_dx=-6, arm_b_a=-26, thigh_f_a=6, shin_f_a=-4, thigh_b_a=-14, shin_b_a=4)
+
+    waist_src = rig["waist_pt"]
+    waist_dst = (ox + waist_src[0] + p["body_dx"], oy + waist_src[1] + p["body_dy"])
+
+    def on_torso(src_pt, extra_dx=0, extra_dy=0):
+        vx = src_pt[0] - waist_src[0]
+        vy = src_pt[1] - waist_src[1]
+        rx, ry = _rot_pt(vx, vy, p["torso_a"])
+        return (waist_dst[0] + rx + extra_dx, waist_dst[1] + ry + extra_dy)
+
+    neck_dst = on_torso(rig["neck_pt"], p["head_dx"], p["head_dy"])
+    sh_f_dst = on_torso(rig["sh_f_pt"], p["arm_f_dx"], p["arm_f_dy"])
+    sh_b_dst = on_torso(rig["sh_b_pt"], p["arm_b_dx"], p["arm_b_dy"])
+
+    # Chaînes cinématiques hanche -> genou -> tibia
+    hip_f_dst = (waist_dst[0] + (rig["hip_f_pt"][0] - waist_src[0]), waist_dst[1] + (rig["hip_f_pt"][1] - waist_src[1]))
+    hip_b_dst = (waist_dst[0] + (rig["hip_b_pt"][0] - waist_src[0]), waist_dst[1] + (rig["hip_b_pt"][1] - waist_src[1]))
+
+    fk_vx = rig["knee_f_pt"][0] - rig["hip_f_pt"][0]
+    fk_vy = rig["knee_f_pt"][1] - rig["hip_f_pt"][1]
+    fk_rx, fk_ry = _rot_pt(fk_vx, fk_vy, p["thigh_f_a"])
+    knee_f_dst = (hip_f_dst[0] + fk_rx, hip_f_dst[1] + fk_ry)
+
+    bk_vx = rig["knee_b_pt"][0] - rig["hip_b_pt"][0]
+    bk_vy = rig["knee_b_pt"][1] - rig["hip_b_pt"][1]
+    bk_rx, bk_ry = _rot_pt(bk_vx, bk_vy, p["thigh_b_a"])
+    knee_b_dst = (hip_b_dst[0] + bk_rx, hip_b_dst[1] + bk_ry)
+
+    # Rendu par ordre de profondeur (arrière-plan -> premier plan)
+    canvas = Image.new("RGBA", (cw, ch), (0, 0, 0, 0))
+    layers = [
+        _place_part(cw, ch, rig["arm_b"], rig["sh_b_pt"], sh_b_dst, p["torso_a"] + p["arm_b_a"]),
+        _place_part(cw, ch, rig["thigh_b"], rig["hip_b_pt"], hip_b_dst, p["thigh_b_a"]),
+        _place_part(cw, ch, rig["shin_b"], rig["knee_b_pt"], knee_b_dst, p["thigh_b_a"] + p["shin_b_a"]),
+        _place_part(cw, ch, rig["torso"], waist_src, waist_dst, p["torso_a"]),
+        _place_part(cw, ch, rig["thigh_f"], rig["hip_f_pt"], hip_f_dst, p["thigh_f_a"]),
+        _place_part(cw, ch, rig["shin_f"], rig["knee_f_pt"], knee_f_dst, p["thigh_f_a"] + p["shin_f_a"]),
+        _place_part(cw, ch, rig["head"], rig["neck_pt"], neck_dst, p["torso_a"] + p["head_a"]),
+        _place_part(cw, ch, rig["arm_f"], rig["sh_f_pt"], sh_f_dst, p["torso_a"] + p["arm_f_a"]),
+    ]
+    for lay in layers:
+        canvas = Image.alpha_composite(canvas, lay)
+
+    # Supprime uniquement les poussières isolées (< 12 px) avant d'ajouter les éclairs d'impact
+    w_c, h_c = canvas.size
+    cpx = canvas.load()
+    vis_c = bytearray(w_c * h_c)
+    for yy in range(h_c):
+        for xx in range(w_c):
+            idx_c = yy * w_c + xx
+            if not vis_c[idx_c] and cpx[xx, yy][3] > 0:
+                q_c = deque([(xx, yy)])
+                vis_c[idx_c] = 1
+                comp = []
+                while q_c:
+                    qx, qy = q_c.popleft()
+                    comp.append((qx, qy))
+                    for nx, ny in ((qx - 1, qy), (qx + 1, qy), (qx, qy - 1), (qx, qy + 1)):
+                        if 0 <= nx < w_c and 0 <= ny < h_c:
+                            nidx = ny * w_c + nx
+                            if not vis_c[nidx] and cpx[nx, ny][3] > 0:
+                                vis_c[nidx] = 1
+                                q_c.append((nx, ny))
+                if len(comp) < 12:
+                    for qx, qy in comp:
+                        cpx[qx, qy] = (0, 0, 0, 0)
+
+    # Petits effets graphiques d'impact 16-bit directement sur les poses d'action
+    draw = ImageDraw.Draw(canvas)
+    if p["fx"] == "punch":
+        # Traînée cinétique blanche/jaune au bout du poing avant
+        bx = layers[7].getbbox()
+        if bx:
+            fx_x, fx_y = bx[2] - 1, (bx[1] + bx[3]) // 2
+            draw.line([(fx_x - 10, fx_y), (fx_x + 7, fx_y)], fill=(254, 240, 138, 240), width=2)
+            draw.arc((fx_x - 3, fx_y - 7, fx_x + 8, fx_y + 7), -75, 75, fill=(255, 255, 255, 235), width=2)
+    elif p["fx"] == "kick":
+        bx = layers[5].getbbox()
+        if bx:
+            fx_x, fx_y = bx[2] - 1, (bx[1] + bx[3]) // 2
+            draw.arc((fx_x - 12, fx_y - 11, fx_x + 7, fx_y + 11), -70, 60, fill=(254, 240, 138, 235), width=2)
+    elif p["fx"] == "sweep":
+        bx = layers[5].getbbox()
+        if bx:
+            fx_x, fx_y = bx[2] - 1, bx[3] - 3
+            draw.line([(fx_x - 18, fx_y), (fx_x + 8, fx_y)], fill=(56, 189, 248, 235), width=2)
+            draw.line([(fx_x - 14, fx_y - 2), (fx_x + 6, fx_y - 2)], fill=(254, 240, 138, 235), width=2)
+    elif p["fx"] == "headbutt":
+        bx = layers[6].getbbox()
+        if bx:
+            fx_x, fx_y = bx[2] + 1, bx[1] + max(4, (bx[3] - bx[1]) // 3)
+            draw.arc((fx_x - 6, fx_y - 9, fx_x + 7, fx_y + 9), -70, 70, fill=(251, 146, 60, 245), width=2)
+            draw.arc((fx_x - 2, fx_y - 6, fx_x + 11, fx_y + 6), -60, 60, fill=(255, 255, 255, 245), width=2)
+    elif p["fx"] == "shoryuken":
+        bx = layers[7].getbbox()
+        if bx:
+            fx_x, fx_y = (bx[0] + bx[2]) // 2, bx[1]
+            draw.polygon([(fx_x, max(0, fx_y - 12)), (fx_x - 5, fx_y + 2), (fx_x + 5, fx_y + 2)], fill=(250, 204, 21, 220))
+            draw.line([(fx_x, max(0, fx_y - 10)), (fx_x, fx_y + 10)], fill=(255, 255, 255, 240), width=2)
+    elif p["fx"] == "spinkick":
+        bx = layers[5].getbbox()
+        if bx:
+            cy_s = (bx[1] + bx[3]) // 2
+            draw.arc((bx[0] - 8, cy_s - 6, bx[2] + 8, cy_s + 6), -25, 205, fill=(56, 189, 248, 225), width=2)
+
+    if pose == "parry":
+        pb = layers[7].getbbox()
+        if pb:
+            gx = pb[2] + 2
+            draw.line([(gx, pb[1] - 4), (gx, pb[3] + 6)], fill=(14, 165, 233, 255), width=3)
+            draw.line([(gx, pb[1] - 2), (gx, pb[3] + 4)], fill=(224, 242, 254, 255), width=1)
+
+    bbox = canvas.getbbox()
+    if not bbox:
+        return None
+    return quantize_and_upscale(canvas.crop(bbox), scale_factor=scale_factor)
 
 
 def add_block(px, w, h, gx, gy, col, bs=3):
@@ -683,7 +882,21 @@ def build_sushi_and_darkmada_special(dark_idle, dark_attack):
                         q.append((nx, ny))
 
     dm_clean = keep_largest_component(dm)
-    return dm_clean, sushi_solo
+
+    # 3) Sushi compagnon (sushi_idle.png) dérivé directement du corps complet de Sushi (4 pattes + queue touffue !)
+    sw_s, sh_s = sushi_solo.size
+    pad_s = Image.new("RGBA", (sw_s + 24, sh_s + 24), (0, 0, 0, 0))
+    pad_s.paste(sushi_solo, (12, 12), sushi_solo)
+    # Incline légèrement vers le sol (posture calme prête à accompagner DarkMada) et redimensionne à taille compagnon
+    rot_s = pad_s.rotate(-10, resample=Image.Resampling.NEAREST)
+    rsb = rot_s.getbbox()
+    cropped_s = rot_s.crop(rsb) if rsb else sushi_solo
+    cw_s, ch_s = cropped_s.size
+    target_h = 132  # hauteur rétro ~44px (proportion parfaite aux pieds du motard 330px)
+    target_w = max(48, round(cw_s * (target_h / ch_s)) // 3 * 3)
+    sushi_idle = cropped_s.resize((target_w, target_h), Image.Resampling.NEAREST)
+
+    return dm_clean, sushi_solo, sushi_idle
 
 
 def make_portrait(idle_sprite):
@@ -741,18 +954,12 @@ def process_fighter(fighter_id):
 
     os.makedirs(FIGHTER_OUT_DIR, exist_ok=True)
 
-    # Poses continues SF2 générées depuis la source HD sans aucun déchirement
     pose_sprites = {
         "idle": idle_sprite,
-        "idle2": generate_deformed_pose(left_crop, "idle2", fighter_id=fighter_id) or idle_sprite,
-        "walk": generate_deformed_pose(left_crop, "walk", fighter_id=fighter_id) or idle_sprite,
-        "crouch": generate_deformed_pose(left_crop, "crouch", fighter_id=fighter_id) or idle_sprite,
-        "jump": generate_deformed_pose(left_crop, "jump", fighter_id=fighter_id) or idle_sprite,
-        "kick": generate_deformed_pose(left_crop, "kick", fighter_id=fighter_id) or attack_sprite,
-        "parry": generate_deformed_pose(left_crop, "parry", fighter_id=fighter_id) or idle_sprite,
         "attack": attack_sprite,
     }
 
+    rig_source = idle_sprite
     if fighter_id == "goldohrack":
         attached_atk, gold_special, gold_fist = build_goldohrack_rocket_pack(attack_sprite)
         pose_sprites["attack"] = attached_atk
@@ -761,18 +968,30 @@ def process_fighter(fighter_id):
     elif fighter_id == "koll":
         pose_sprites["special"] = build_koll_bunny_special(idle_sprite)
     elif fighter_id == "darkmada":
-        dark_special, sushi_solo = build_sushi_and_darkmada_special(idle_sprite, attack_sprite)
+        dark_special, sushi_solo, sushi_idle = build_sushi_and_darkmada_special(idle_sprite, attack_sprite)
         pose_sprites["special"] = dark_special
-        # Utilise DarkMada seul (sans Sushi collé aux chevilles) pour saut et coup de pied propres
-        pose_sprites["jump"] = generate_deformed_pose(dark_special, "jump", fighter_id=fighter_id) or pose_sprites["jump"]
-        pose_sprites["kick"] = generate_deformed_pose(dark_special, "kick", fighter_id=fighter_id) or pose_sprites["kick"]
+        # DarkMada articulé depuis son corps sans Sushi (Sushi est animé séparément à côté de lui !)
+        rig_source = dark_special
         sushi_solo.save(os.path.join(FIGHTER_OUT_DIR, "sushi_solo.png"), "PNG")
+        sushi_idle.save(os.path.join(FIGHTER_OUT_DIR, "sushi_idle.png"), "PNG")
+
+    # Découpe squelettique 1x rétro & génération des 16 poses articulées SF2 !
+    retro_base = _to_retro_base(rig_source, target_retro_h=110)
+    if retro_base is not None:
+        rig = _segment_fighter(retro_base, fighter_id)
+        articulated_names = [
+            "idle2", "walk", "walk2", "crouch", "crouch_punch", "jump",
+            "punch1", "punch", "kick1", "kick", "sweep",
+            "headbutt", "shoryuken", "spinkick", "parry", "hit",
+        ]
+        for pname in articulated_names:
+            pose_sprites[pname] = generate_articulated_pose(rig, pname, fighter_id=fighter_id) or idle_sprite
 
     for suffix, sp in pose_sprites.items():
         sp.save(os.path.join(FIGHTER_OUT_DIR, f"{fighter_id}_{suffix}.png"), "PNG")
 
     make_portrait(idle_sprite).save(os.path.join(FIGHTER_OUT_DIR, f"{fighter_id}_portrait.png"), "PNG")
-    print(f"[OK] Fighter {fighter_id} -> {len(pose_sprites)} poses ({idle_sprite.size})")
+    print(f"[OK] Fighter {fighter_id} -> {len(pose_sprites)} articulated poses ({idle_sprite.size})")
     return True
 
 
